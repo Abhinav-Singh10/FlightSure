@@ -1,0 +1,22 @@
+name: flightsure-foundation
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: flightsure
+      POSTGRES_PASSWORD: flightsure_dev
+      POSTGRES_DB: flightsure
+    command: ["postgres", "-c", "timezone=Asia/Kolkata"]
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - foundation_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flightsure -d flightsure"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  foundation_data:
