@@ -14,5 +14,7 @@ export const pool = new pg.Pool({
 });
 
 pool.on('error', () => {
-  console.error('An idle database connection failed. Check that PostgreSQL is running.');
+  console.error(
+    'An idle database connection failed. Check that PostgreSQL is running.',
+  );
 });
