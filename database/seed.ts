@@ -17,25 +17,40 @@ const departureHours = [9, 13, 17];
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 
 async function seed() {
-  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? 'admin@flightsure.test').trim().toLowerCase();
+  const adminEmail = (process.env.SEED_ADMIN_EMAIL ?? 'admin@flightsure.test')
+    .trim()
+    .toLowerCase();
   const adminPassword = process.env.SEED_ADMIN_PASSWORD;
 
   if (!adminEmail.includes('@') || adminEmail.length > 254) {
     throw new Error('SEED_ADMIN_EMAIL must be a valid email address.');
   }
-  if (!adminPassword || adminPassword.length < 8 || Buffer.byteLength(adminPassword, 'utf8') > 72) {
-    throw new Error('SEED_ADMIN_PASSWORD needs at least 8 characters and at most 72 UTF-8 bytes.');
+  if (
+    !adminPassword ||
+    adminPassword.length < 8 ||
+    Buffer.byteLength(adminPassword, 'utf8') > 72
+  ) {
+    throw new Error(
+      'SEED_ADMIN_PASSWORD needs at least 8 characters and at most 72 UTF-8 bytes.',
+    );
   }
 
   // IST has a fixed +05:30 offset. Shift before extracting tomorrow's calendar date.
-  const tomorrowInIst = new Date(Date.now() + 330 * 60 * 1000 + dayInMilliseconds);
-  const startDate = process.env.SEED_START_DATE ?? tomorrowInIst.toISOString().slice(0, 10);
+  const tomorrowInIst = new Date(
+    Date.now() + 330 * 60 * 1000 + dayInMilliseconds,
+  );
+  const startDate =
+    process.env.SEED_START_DATE ?? tomorrowInIst.toISOString().slice(0, 10);
   const firstDay = new Date(`${startDate}T00:00:00Z`);
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate)
-    || Number.isNaN(firstDay.getTime())
-    || firstDay.toISOString().slice(0, 10) !== startDate) {
-    throw new Error('SEED_START_DATE must be a valid YYYY-MM-DD calendar date.');
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(startDate) ||
+    Number.isNaN(firstDay.getTime()) ||
+    firstDay.toISOString().slice(0, 10) !== startDate
+  ) {
+    throw new Error(
+      'SEED_START_DATE must be a valid YYYY-MM-DD calendar date.',
+    );
   }
 
   const client = await pool.connect();
@@ -50,7 +65,9 @@ async function seed() {
     const account = existingAdmin.rows[0];
 
     if (account && account.role !== 'ADMIN') {
-      throw new Error('The seed admin email already belongs to a passenger account.');
+      throw new Error(
+        'The seed admin email already belongs to a passenger account.',
+      );
     }
     if (!account) {
       const passwordHash = await bcrypt.hash(adminPassword, 12);
@@ -87,7 +104,9 @@ async function seed() {
         routeNumber += 1;
 
         for (let day = 0; day < 3; day += 1) {
-          const date = new Date(firstDay.getTime() + day * dayInMilliseconds).toISOString().slice(0, 10);
+          const date = new Date(firstDay.getTime() + day * dayInMilliseconds)
+            .toISOString()
+            .slice(0, 10);
 
           for (const hour of departureHours) {
             const flightNumber = `FS${routeNumber}${hour}`;
@@ -99,7 +118,15 @@ async function seed() {
                  (flight_number, origin, destination, departure_at, arrival_at, fare_paise, layout_id)
                VALUES ($1, $2, $3, $4, $5, $6, $7)
                ON CONFLICT (flight_number, departure_at) DO NOTHING`,
-              [flightNumber, origin.code, destination.code, departureAt, arrivalAt, 450000, layout.id],
+              [
+                flightNumber,
+                origin.code,
+                destination.code,
+                departureAt,
+                arrivalAt,
+                450000,
+                layout.id,
+              ],
             );
             const flightResult = await client.query<IdRow>(
               'SELECT id FROM flights WHERE flight_number = $1 AND departure_at = $2',
@@ -123,8 +150,12 @@ async function seed() {
     }
 
     await client.query('COMMIT');
-    console.log(`Seeds ready for ${startDate} and the next two days: 54 flights, 12 seats per flight.`);
-    console.log('Existing records and the admin password were preserved. No passengers were seeded.');
+    console.log(
+      `Seeds ready for ${startDate} and the next two days: 54 flights, 12 seats per flight.`,
+    );
+    console.log(
+      'Existing records and the admin password were preserved. No passengers were seeded.',
+    );
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
@@ -136,7 +167,10 @@ async function seed() {
 try {
   await seed();
 } catch (error) {
-  console.error('Seeding failed:', error instanceof Error ? error.message : 'Unknown error');
+  console.error(
+    'Seeding failed:',
+    error instanceof Error ? error.message : 'Unknown error',
+  );
   process.exitCode = 1;
 } finally {
   await pool.end();

@@ -13,7 +13,9 @@ async function migrate() {
     `);
 
     const filenames = await readdir('database/migrations');
-    const migrations = filenames.filter((name) => /^\d+_.*\.sql$/.test(name)).sort();
+    const migrations = filenames
+      .filter((name) => /^\d+_.*\.sql$/.test(name))
+      .sort();
 
     for (const filename of migrations) {
       const applied = await client.query(
@@ -32,7 +34,10 @@ async function migrate() {
       await client.query('BEGIN');
       try {
         await client.query(sql);
-        await client.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [filename]);
+        await client.query(
+          'INSERT INTO schema_migrations (filename) VALUES ($1)',
+          [filename],
+        );
         await client.query('COMMIT');
         console.log(`Applied: ${filename}`);
       } catch (error) {
@@ -48,7 +53,10 @@ async function migrate() {
 try {
   await migrate();
 } catch (error) {
-  console.error('Migration failed:', error instanceof Error ? error.message : 'Unknown error');
+  console.error(
+    'Migration failed:',
+    error instanceof Error ? error.message : 'Unknown error',
+  );
   process.exitCode = 1;
 } finally {
   await pool.end();
