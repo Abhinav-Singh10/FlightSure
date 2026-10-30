@@ -12,7 +12,7 @@ const airports = [
 
 const layoutName = 'FlightSure 2-2 cabin';
 const columns = ['A', 'B', 'C', 'D'];
-const rowCount = 3;
+const rowCount = 20;
 const departureHours = [9, 13, 17];
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 
@@ -86,7 +86,8 @@ async function seed() {
 
     await client.query(
       `INSERT INTO aircraft_layouts (name, row_count, columns, aisle_after)
-       VALUES ($1, $2, $3, $4) ON CONFLICT (name) DO NOTHING`,
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (name) DO NOTHING`,
       [layoutName, rowCount, columns, ['B']],
     );
     const layoutResult = await client.query<IdRow>(
@@ -113,11 +114,12 @@ async function seed() {
             const departureAt = `${date}T${String(hour).padStart(2, '0')}:00:00+05:30`;
             const arrivalAt = `${date}T${String(hour + 2).padStart(2, '0')}:00:00+05:30`;
 
-            await client.query(
+            const flightResult = await client.query<IdRow>(
               `INSERT INTO flights
                  (flight_number, origin, destination, departure_at, arrival_at, fare_paise, layout_id)
                VALUES ($1, $2, $3, $4, $5, $6, $7)
-               ON CONFLICT (flight_number, departure_at) DO NOTHING`,
+               ON CONFLICT (flight_number, departure_at) DO NOTHING
+               RETURNING id`,
               [
                 flightNumber,
                 origin.code,
@@ -128,18 +130,15 @@ async function seed() {
                 layout.id,
               ],
             );
-            const flightResult = await client.query<IdRow>(
-              'SELECT id FROM flights WHERE flight_number = $1 AND departure_at = $2',
-              [flightNumber, departureAt],
-            );
+
             const flight = flightResult.rows[0];
-            if (!flight) throw new Error('A seeded flight was not found.');
+            if (!flight) continue; // This flight was already seeded.
 
             for (let row = 1; row <= rowCount; row += 1) {
               for (const column of columns) {
                 await client.query(
                   `INSERT INTO flight_seats (flight_id, label, row_number, column_letter)
-                   VALUES ($1, $2, $3, $4) ON CONFLICT (flight_id, label) DO NOTHING`,
+                   VALUES ($1, $2, $3, $4)`,
                   [flight.id, `${row}${column}`, row, column],
                 );
               }
@@ -151,7 +150,7 @@ async function seed() {
 
     await client.query('COMMIT');
     console.log(
-      `Seeds ready for ${startDate} and the next two days: 54 flights, 12 seats per flight.`,
+      `Seeds ready for ${startDate} and the next two days: 54 flights, ${rowCount * columns.length} seats per flight.`,
     );
     console.log(
       'Existing records and the admin password were preserved. No passengers were seeded.',
