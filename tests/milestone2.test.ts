@@ -10,6 +10,8 @@ import type {
   Pagination,
   SeatMap,
   Session,
+  WaitlistEntry,
+  OfferAcceptance,
 } from '../shared/types.ts';
 
 const testUrl = process.env.TEST_DATABASE_URL;
@@ -52,6 +54,8 @@ afterAll(async () => {
       'DELETE FROM seat_allocations WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))',
       [createdEmails],
     );
+    await pool.query('DELETE FROM notifications WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
+    await pool.query('DELETE FROM waitlist_entries WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
     await pool.query('DELETE FROM booking_assignments WHERE booking_id IN (SELECT id FROM bookings WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[])))', [createdEmails]);
     await pool.query('DELETE FROM bookings WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
     await pool.query('DELETE FROM payments WHERE hold_id IN (SELECT id FROM holds WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[])))', [createdEmails]);
@@ -482,4 +486,75 @@ test('a restarted worker voids late success without removing the replacement sea
   const claim = await pool.query<{ hold_id: string }>('SELECT hold_id FROM seat_allocations WHERE seat_id = $1', [input.seatId]);
   expect(claim.rows[0].hold_id).toBe(next.data.id);
   expect((await (await student.request('/bookings')).json()).data).toEqual([]);
+});
+
+test('a full flight offers seats in queue order, expires offers and fulfills one accepted booking', async () => {
+  const blocker = await registeredPassenger();
+  const first = await registeredPassenger();
+  const second = await registeredPassenger();
+  const found: { data: Flight[] } = await (await blocker.request(`/flights?origin=DEL&destination=BLR&departureDate=${date}`)).json();
+  const flight = found.data[1];
+  const cabin: { data: SeatMap } = await (await blocker.request(`/flights/${flight.id}/seats`)).json();
+  const held: { data: Hold } = await (await blocker.request('/holds', {
+    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ flightId: flight.id, seatId: cabin.data.seats[0].id }),
+  })).json();
+  // Fill the other 79 seats with disposable fixtures, without changing normal seeds.
+  for (const seat of cabin.data.seats.slice(1)) {
+    await pool.query(`WITH passenger AS (
+      INSERT INTO accounts (email, password_hash) VALUES ($1, 'test fixture; no login') RETURNING id
+    ), held AS (
+      INSERT INTO holds (account_id, flight_id, seat_id, quote_paise, created_at, expires_at)
+      SELECT id, $2, $3, 450000, clock_timestamp(), clock_timestamp() + interval '5 minutes' FROM passenger RETURNING *
+    ) INSERT INTO seat_allocations (seat_id, flight_id, account_id, hold_id) SELECT seat_id, flight_id, account_id, id FROM held`,
+    [newEmail(), flight.id, seat.id]);
+  }
+  const options = { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: '{}' };
+  const joined = await first.request(`/flights/${flight.id}/waitlist`, options);
+  expect(joined.status).toBe(201);
+  const firstEntry: { data: WaitlistEntry } = await joined.json();
+  expect(firstEntry.data).toMatchObject({ status: 'WAITING', offerHold: null });
+  const replay = await first.request(`/flights/${flight.id}/waitlist`, options);
+  expect(replay.headers.get('Idempotency-Replayed')).toBe('true');
+  expect((await replay.json()).data.id).toBe(firstEntry.data.id);
+  const duplicate = await first.request(`/flights/${flight.id}/waitlist`, { ...options, headers: { 'Idempotency-Key': randomUUID() } });
+  expect((await duplicate.json()).error.existingResourceId).toBe(firstEntry.data.id);
+  const secondEntry: { data: WaitlistEntry } = await (await second.request(`/flights/${flight.id}/waitlist`, { ...options, headers: { 'Idempotency-Key': randomUUID() } })).json();
+  expect((await second.request(`/waitlist/${firstEntry.data.id}`)).status).toBe(404);
+  await blocker.request(`/holds/${held.data.id}`, { method: 'DELETE', headers: { 'Idempotency-Key': randomUUID() } });
+  const offered: { data: WaitlistEntry } = await (await first.request(`/waitlist/${firstEntry.data.id}`)).json();
+  expect(offered.data.status).toBe('OFFERED');
+  const offerHold = offered.data.offerHold;
+  if (!offerHold) throw new Error('The first passenger did not receive a seat offer.');
+  expect(offerHold).toMatchObject({ source: 'WAITLIST', waitlistEntryId: firstEntry.data.id, seat: held.data.seat });
+  expect((await (await second.request(`/waitlist/${secondEntry.data.id}`)).json()).data.status).toBe('WAITING');
+  expect((await (await first.request('/notifications')).json()).data).toHaveLength(1);
+  expect((await (await second.request('/notifications')).json()).data).toHaveLength(0);
+  const bypass = await blocker.request('/holds', { ...options, headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ flightId: flight.id, seatId: offerHold.seat.id }) });
+  expect((await bypass.json()).error.code).toBe('SEAT_UNAVAILABLE');
+  await pool.query("UPDATE holds SET created_at = clock_timestamp() - interval '6 minutes', expires_at = clock_timestamp() - interval '1 second' WHERE id = $1", [offerHold.id]);
+  const { processWorkerPass } = await import('../server/worker.ts');
+  await processWorkerPass();
+  await processWorkerPass();
+  expect((await (await first.request(`/waitlist/${firstEntry.data.id}`)).json()).data.status).toBe('EXPIRED');
+  const next: { data: WaitlistEntry } = await (await second.request(`/waitlist/${secondEntry.data.id}`)).json();
+  if (!next.data.offerHold) throw new Error('The second passenger did not receive the released seat.');
+  expect((await (await second.request('/notifications')).json()).data).toHaveLength(1);
+  const paymentOptions = { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ outcome: 'SUCCESS', passengerName: 'Queued Passenger', passengerAge: 24 }) };
+  const notAccepted = await second.request(`/holds/${next.data.offerHold.id}/payments`, paymentOptions);
+  expect((await notAccepted.json()).error.code).toBe('OFFER_NOT_ACCEPTED');
+  const acceptOptions = { ...options, headers: { 'Idempotency-Key': randomUUID() } };
+  const accepted: { data: OfferAcceptance } = await (await second.request(`/waitlist/${secondEntry.data.id}/accept`, acceptOptions)).json();
+  expect(accepted.data.hold.expiresAt).toBe(next.data.offerHold.expiresAt);
+  const acceptReplay = await second.request(`/waitlist/${secondEntry.data.id}/accept`, acceptOptions);
+  expect(acceptReplay.headers.get('Idempotency-Replayed')).toBe('true');
+  const paid: { data: Payment } = await (await second.request(`/holds/${accepted.data.hold.id}/payments`, paymentOptions)).json();
+  await processWorkerPass();
+  await processWorkerPass();
+  const finished: { data: WaitlistEntry } = await (await second.request(`/waitlist/${secondEntry.data.id}`)).json();
+  const payment: { data: Payment } = await (await second.request(`/payments/${paid.data.id}`)).json();
+  expect(finished.data).toMatchObject({ status: 'FULFILLED', bookingId: payment.data.bookingId });
+  expect(payment.data.status).toBe('SUCCEEDED');
+  const booking: { data: Booking } = await (await second.request(`/bookings/${finished.data.bookingId}`)).json();
+  expect(booking.data).toMatchObject({ status: 'CONFIRMED', seat: offerHold.seat, passenger: { name: 'Queued Passenger', age: 24 } });
+  expect((await (await second.request('/notifications')).json()).data).toHaveLength(1);
 });

@@ -9,6 +9,7 @@ import { AuthDialog } from './AuthDialog.tsx';
 import { Checkout } from './Checkout.tsx';
 import { BookingDetails } from './BookingDetails.tsx';
 import { MyBookings } from './MyBookings.tsx';
+import { WaitlistDetails } from './WaitlistDetails.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
 
@@ -20,6 +21,8 @@ function readView() {
     page: query.get('view') ?? 'search',
     holdId: query.get('hold'),
     bookingId: query.get('booking'),
+    entryId: query.get('entry'),
+    tab: query.get('tab') === 'waitlist' ? 'waitlist' : query.get('tab') === 'messages' ? 'messages' : 'bookings',
   };
 }
 
@@ -33,7 +36,8 @@ export function App() {
   const checkoutOpen = view.page === 'checkout' && view.holdId !== null;
   const bookingOpen = view.page === 'booking' && view.bookingId !== null;
   const bookingsOpen = view.page === 'bookings';
-  const focusedView = cabinOpen || checkoutOpen || bookingOpen || bookingsOpen;
+  const waitlistOpen = view.page === 'waitlist' && view.entryId !== null;
+  const focusedView = cabinOpen || checkoutOpen || bookingOpen || bookingsOpen || waitlistOpen;
 
   function navigate(query: URLSearchParams) {
     window.history.pushState(null, '', query.size ? `?${query}` : window.location.pathname);
@@ -43,6 +47,8 @@ export function App() {
   function openCheckout(id: string) { navigate(new URLSearchParams({ view: 'checkout', hold: id })); }
   function openBooking(id: string) { navigate(new URLSearchParams({ view: 'booking', booking: id })); }
   function openBookings() { navigate(new URLSearchParams({ view: 'bookings' })); }
+  function openTab(tab: string) { navigate(new URLSearchParams(tab === 'bookings' ? { view: 'bookings' } : { view: 'bookings', tab })); }
+  function openEntry(id: string) { navigate(new URLSearchParams({ view: 'waitlist', entry: id })); }
 
   function openFlight(id: string | null, cabin = false) {
     const query = new URLSearchParams();
@@ -81,7 +87,7 @@ export function App() {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [flightId, view.page, view.holdId, view.bookingId]);
+  }, [flightId, view.page, view.holdId, view.bookingId, view.entryId, view.tab]);
 
   async function signOut() {
     if (!session) return;
@@ -226,15 +232,17 @@ export function App() {
             onBack={() => openFlight(flightId)}
             onLogin={() => setAuthMode('login')}
             onSessionExpired={() => void refreshSession()}
-            onCheckout={openCheckout} onBooking={openBooking} onBookings={openBookings}
+            onCheckout={openCheckout} onBooking={openBooking} onBookings={openBookings} onEntry={openEntry}
           />
         )}
         {checkoutOpen && view.holdId && <Checkout key={`${view.holdId}:${session?.user?.id ?? 'guest'}`} holdId={view.holdId} user={session?.user ?? null}
-          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBooking={openBooking} onCabin={(id) => openFlight(id, true)} />}
+          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBooking={openBooking} onCabin={(id) => openFlight(id, true)} onEntry={openEntry} />}
         {bookingOpen && view.bookingId && <BookingDetails key={`${view.bookingId}:${session?.user?.id ?? 'guest'}`} id={view.bookingId} user={session?.user ?? null}
           onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBookings={openBookings} onFlight={openFlight} />}
-        {bookingsOpen && <MyBookings key={session?.user?.id ?? 'guest'} user={session?.user ?? null}
-          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onOpen={openBooking} onSearch={() => openFlight(null)} />}
+        {bookingsOpen && <MyBookings key={`${session?.user?.id ?? 'guest'}:${view.tab}`} user={session?.user ?? null} tab={view.tab} onTab={openTab}
+          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onOpen={openBooking} onEntry={openEntry} onSearch={() => openFlight(null)} />}
+        {waitlistOpen && view.entryId && <WaitlistDetails key={`${view.entryId}:${session?.user?.id ?? 'guest'}`} id={view.entryId} user={session?.user ?? null}
+          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBack={() => openTab('waitlist')} onCheckout={openCheckout} onBooking={openBooking} onFlight={openFlight} />}
         <div
           className={
             focusedView
@@ -252,6 +260,7 @@ export function App() {
                 id={flightId}
                 onBack={() => openFlight(null)}
                 onViewSeats={() => openFlight(flightId, true)}
+                user={session?.user ?? null} onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onEntry={openEntry} onBooking={openBooking}
               />
             )}
           </div>

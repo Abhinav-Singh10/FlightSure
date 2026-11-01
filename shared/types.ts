@@ -90,3 +90,25 @@ export type Booking = {
   cancellationReason: string | null;
   passenger: { name: string; age: number } | null;
 };
+
+export type WaitlistEntry = {
+  id: string;
+  flightId: string;
+  status: 'WAITING' | 'OFFERED' | 'FULFILLED' | 'WITHDRAWN' | 'EXPIRED' | 'CLOSED';
+  joinedAt: string;
+  offerHold: Hold | null;
+  acceptedAt: string | null;
+  bookingId: string | null;
+};
+
+export type OfferAcceptance = { waitlistEntry: WaitlistEntry; hold: Hold };
+
+export type Notification = {
+  id: string;
+  type: 'WAITLIST_OFFER' | 'FLIGHT_CANCELLED' | 'REBOOKED' | 'NO_ALTERNATIVE';
+  message: string;
+  flightId: string;
+  bookingId: string | null;
+  waitlistEntryId: string | null;
+  createdAt: string;
+};

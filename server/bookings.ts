@@ -9,6 +9,7 @@ import { flightData, flightSelect } from './flights.ts';
 import type { FlightRow } from './flights.ts';
 import { readOperation, saveOperation } from './operations.ts';
 import type { Booking } from '../shared/types.ts';
+import { processFlightWaitlist } from './allocations.ts';
 
 export const bookings = Router();
 const bookingPath = z.object({ bookingId: z.string().uuid() }).strict();
@@ -111,6 +112,7 @@ bookings.post('/:bookingId/cancel', async (request, response) => {
     if (row.status !== 'CANCELLED') {
       await client.query('DELETE FROM seat_allocations WHERE booking_id = $1', [bookingId]);
       await client.query("UPDATE bookings SET status = 'CANCELLED', current_flight_id = NULL, seat_id = NULL, cancellation_reason = 'Cancelled by passenger.' WHERE id = $1", [bookingId]);
+      await processFlightWaitlist(client, flightId);
     }
     const booking = await readBooking(client, bookingId, user.id);
     if (!booking) throw new Error('The cancelled booking was not found.');

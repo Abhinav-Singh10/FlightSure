@@ -5,6 +5,7 @@ import { HoldSummary } from './HoldSummary.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
 import { money } from './display.ts';
+import { JoinWaitlist } from './JoinWaitlist.tsx';
 
 type SavedHold = { holdId?: string; createKey?: string; seatId?: string; releaseKey?: string };
 
@@ -21,10 +22,11 @@ function readSaved(key: string): SavedHold {
   } catch { return {}; }
 }
 
-export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin, onSessionExpired, onCheckout, onBooking, onBookings }: {
+export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin, onSessionExpired, onCheckout, onBooking, onBookings, onEntry }: {
   flight: Flight; initialSeats: SeatMap; user: User | null;
   onFlightChange: (flight: Flight) => void; onLogin: () => void; onSessionExpired: () => void;
   onCheckout: (id: string) => void; onBooking: (id: string) => void; onBookings: () => void;
+  onEntry: (id: string) => void;
 }) {
   const storageKey = `flightsure:hold:${user?.id ?? 'anonymous'}:${flight.id}`;
   const [saved, setSaved] = useState(() => readSaved(storageKey));
@@ -209,7 +211,11 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
         </div>
         {flight.bookable && flight.availableSeats === 0 && !hasHold && <p className="mt-3 text-sm">All seats are currently unavailable. Refresh to check for released seats.</p>}
         {existingBookingId && <Button variant="outline" className="mt-3 w-full" onClick={() => { if (existingBookingId) onBooking(existingBookingId); }}>View existing booking</Button>}
-        {current && <HoldSummary {...current} busy={busy} onRelease={() => void release()} onExpire={() => void refresh().catch(showError)} onCheckout={() => onCheckout(current.hold.id)} onBooking={onBooking} />}
+        {flight.bookable && flight.availableSeats === 0 && !hasHold && !bookedSeat && <div className="mt-4"><JoinWaitlist flightId={flight.id} user={user} onLogin={onLogin} onSessionExpired={onSessionExpired} onEntry={onEntry} onBooking={onBooking} onCabin={() => void refresh().catch(showError)} /></div>}
+        {current && <HoldSummary {...current} busy={busy} onRelease={() => current.hold.waitlistEntryId ? onEntry(current.hold.waitlistEntryId) : void release()} onExpire={() => void refresh().catch(showError)}
+          checkoutLabel={current.hold.waitlistEntryId ? 'View seat offer' : undefined}
+          releaseLabel={current.hold.waitlistEntryId ? 'Manage offer' : undefined}
+          onCheckout={() => current.hold.waitlistEntryId ? onEntry(current.hold.waitlistEntryId) : onCheckout(current.hold.id)} onBooking={onBooking} />}
         {!hasHold && !bookedSeat && <p className="mt-4 text-xs leading-5 text-muted-foreground">Selecting a seat does not reserve it. Your seat is reserved temporarily only after the hold succeeds.</p>}
       </Card>
       <div className="mt-4 rounded-xl border border-border px-5 py-4 text-xs leading-6 text-muted-foreground">

@@ -3,6 +3,9 @@ import type {
   Payment,
   Booking,
   StartPaymentInput,
+  WaitlistEntry,
+  OfferAcceptance,
+  Notification,
   Hold,
   Pagination,
   SeatMap,
@@ -175,4 +178,40 @@ export async function cancelBooking(id: string, key: string) {
   });
   const body: { data: Booking } = await response.json();
   return body.data;
+}
+
+export async function joinWaitlist(flightId: string, key: string) {
+  const response = await request(`/flights/${flightId}/waitlist`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}' });
+  const body: { data: WaitlistEntry } = await response.json();
+  return body.data;
+}
+
+export async function loadWaitlist(page = 1) {
+  const response = await request(`/waitlist?page=${page}`);
+  const body: { data: WaitlistEntry[]; pagination: Pagination } = await response.json();
+  return body;
+}
+
+export async function loadWaitlistEntry(id: string) {
+  const response = await request(`/waitlist/${id}`);
+  const body: { data: WaitlistEntry; meta: { serverTime: string } } = await response.json();
+  return { entry: body.data, serverTime: body.meta.serverTime, receivedAt: Date.now() };
+}
+
+export async function acceptOffer(id: string, key: string) {
+  const response = await request(`/waitlist/${id}/accept`, { method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}' });
+  const body: { data: OfferAcceptance } = await response.json();
+  return body.data;
+}
+
+export async function withdrawWaitlist(id: string, key: string) {
+  const response = await request(`/waitlist/${id}`, { method: 'DELETE', headers: { 'Idempotency-Key': key } });
+  const body: { data: WaitlistEntry } = await response.json();
+  return body.data;
+}
+
+export async function loadNotifications(page = 1) {
+  const response = await request(`/notifications?page=${page}`);
+  const body: { data: Notification[]; pagination: Pagination } = await response.json();
+  return body;
 }

@@ -9,9 +9,11 @@ function secondsLeft(expiresAt: string, serverTime: string, receivedAt: number) 
   return Math.max(0, Math.ceil((deadline - serverNow) / 1000));
 }
 
-export function HoldSummary({ hold, serverTime, receivedAt, busy, onRelease, onExpire, onCheckout, onBooking }: {
+export function HoldSummary({ hold, serverTime, receivedAt, busy, onRelease, onExpire, onCheckout, onBooking, checkoutLabel, releaseLabel }: {
   hold: Hold; serverTime: string; receivedAt: number; busy: boolean;
   onRelease: () => void; onExpire: () => void; onCheckout?: () => void; onBooking?: (id: string) => void;
+  checkoutLabel?: string;
+  releaseLabel?: string;
 }) {
   const [seconds, setSeconds] = useState(() => secondsLeft(hold.expiresAt, serverTime, receivedAt));
   useEffect(() => {
@@ -33,8 +35,8 @@ export function HoldSummary({ hold, serverTime, receivedAt, busy, onRelease, onE
     {active || pending ? <>
       <p className="mt-2 text-sm">Hold time remaining: <strong className="tabular-nums">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, '0')}</strong></p>
       <p className="mt-1 text-xs text-muted-foreground">{pending && seconds === 0 ? 'The hold deadline has passed. Check the payment outcome.' : `Expires at ${hold.expiresAt.slice(11, 19)} IST. A hold is not a confirmed booking.`}</p>
-      {onCheckout && <Button className="mt-4 w-full" disabled={busy} onClick={onCheckout}>{pending ? 'View payment' : 'Continue to checkout'}</Button>}
-      {active && <Button variant="outline" className="mt-3" disabled={busy} onClick={onRelease}>{busy ? 'Please wait…' : 'Release seat'}</Button>}
+      {onCheckout && <Button className="mt-4 w-full" disabled={busy} onClick={onCheckout}>{checkoutLabel ?? (pending ? 'View payment' : 'Continue to checkout')}</Button>}
+      {active && <Button variant="outline" className="mt-3" disabled={busy} onClick={onRelease}>{busy ? 'Please wait…' : releaseLabel ?? 'Release seat'}</Button>}
     </> : <>
       <p className="mt-2 text-sm">{hold.status === 'EXPIRED' ? 'Your hold expired. Choose an available seat to try again.' : hold.status === 'RELEASED' ? 'Your seat has been released.' : hold.status === 'CONSUMED' ? 'This hold has become a booking.' : `Hold status: ${hold.status}.`}</p>
       {hold.paymentId && !hold.bookingId && onCheckout && <Button className="mt-4" onClick={onCheckout}>View payment</Button>}

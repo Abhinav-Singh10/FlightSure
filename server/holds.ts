@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { z } from 'zod';
 import { pool } from './db.ts';
 import { readPassenger } from './session.ts';
 import { fail, meta } from './http.ts';
 import { formatIst } from './time.ts';
-import { expireFlightHolds } from './allocations.ts';
+import { processFlightWaitlist } from './allocations.ts';
 import { readOperation, saveOperation } from './operations.ts';
 import type { Hold } from '../shared/types.ts';
 
@@ -18,23 +18,25 @@ const operationKey = z.string().uuid();
 type HoldRow = {
   id: string; flight_id: string; seat_id: string; label: string;
   payment_id: string | null; booking_id: string | null;
+  waitlist_entry_id: string | null;
   source: Hold['source']; status: Hold['status']; expires_at: Date; quote_paise: number;
 };
 type HoldResult = { hold: Hold } | { code: string; message: string; status: number; existingId?: string };
 type FlightRow = { id: string; status: string; departure_at: Date; fare_paise: number };
 
-const holdSelect = `SELECT h.id, h.flight_id, h.seat_id, s.label, h.source, h.quote_paise, h.expires_at, p.id AS payment_id, b.id AS booking_id,
+const holdSelect = `SELECT h.id, h.flight_id, h.seat_id, s.label, h.source, h.quote_paise, h.expires_at, p.id AS payment_id, b.id AS booking_id, w.id AS waitlist_entry_id,
   CASE WHEN h.status IN ('ACTIVE', 'PAYMENT_PENDING') AND h.expires_at <= clock_timestamp()
     THEN 'EXPIRED' ELSE h.status END AS status
   FROM holds h JOIN flight_seats s ON s.id = h.seat_id
-  LEFT JOIN payments p ON p.hold_id = h.id LEFT JOIN bookings b ON b.payment_id = p.id`;
+  LEFT JOIN payments p ON p.hold_id = h.id LEFT JOIN bookings b ON b.payment_id = p.id
+  LEFT JOIN waitlist_entries w ON w.offer_hold_id = h.id`;
 
 function formatHold(row: HoldRow): Hold {
   return {
     id: row.id, flightId: row.flight_id, seat: { id: row.seat_id, label: row.label },
     source: row.source, status: row.status, expiresAt: formatIst(row.expires_at),
     quote: { amountMinor: row.quote_paise, currency: 'INR' },
-    waitlistEntryId: null, paymentId: row.payment_id, bookingId: row.booking_id,
+    waitlistEntryId: row.waitlist_entry_id, paymentId: row.payment_id, bookingId: row.booking_id,
   };
 }
 
@@ -44,16 +46,21 @@ holds.use((request, response, next) => {
   next();
 });
 
+export async function readHold(client: Pool | PoolClient, holdId: string, accountId: string) {
+  const result = await client.query<HoldRow>(`${holdSelect} WHERE h.id = $1 AND h.account_id = $2`, [holdId, accountId]);
+  return result.rows[0] ? formatHold(result.rows[0]) : null;
+}
+
 holds.get('/:holdId', async (request, response) => {
   const user = await readPassenger(request, response);
   if (!user) return;
   const { holdId } = holdPath.parse(request.params);
-  const result = await pool.query<HoldRow>(`${holdSelect} WHERE h.id = $1 AND h.account_id = $2`, [holdId, user.id]);
-  if (!result.rows[0]) {
+  const hold = await readHold(pool, holdId, user.id);
+  if (!hold) {
     fail(response, 404, 'HOLD_NOT_FOUND', 'Hold not found.');
     return;
   }
-  response.json({ data: formatHold(result.rows[0]), meta: meta() });
+  response.json({ data: hold, meta: meta() });
 });
 
 async function createHold(
@@ -146,10 +153,10 @@ async function changeHold(request: Request, response: Response) {
       fail(response, 404, 'FLIGHT_NOT_FOUND', 'Flight not found.');
       return;
     }
+    await processFlightWaitlist(client, flightId);
     // now() is fixed at BEGIN; sample the real time after any lock wait.
     const time = await client.query<{ checked_at: Date }>('SELECT clock_timestamp() AS checked_at');
     const checkedAt = time.rows[0].checked_at;
-    await expireFlightHolds(client, flightId, checkedAt);
     const result = input
       ? await createHold(client, user.id, flight, input.seatId, checkedAt)
       : await releaseHold(client, user.id, holdId);
@@ -158,6 +165,7 @@ async function changeHold(request: Request, response: Response) {
       fail(response, result.status, result.code, result.message, [], result.existingId ?? null);
       return;
     }
+    if (releasing) await processFlightWaitlist(client, flightId);
     await saveOperation(client, user.id, operation, key, status, result.hold);
     await client.query('COMMIT');
     response.set('Idempotency-Replayed', 'false');

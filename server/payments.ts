@@ -6,7 +6,7 @@ import { readPassenger } from './session.ts';
 import { fail, meta } from './http.ts';
 import { formatIst } from './time.ts';
 import { readOperation, saveOperation } from './operations.ts';
-import { confirmCheckout, expireFlightHolds, releaseCheckout } from './allocations.ts';
+import { acceptedCheckout, confirmCheckout, expireFlightHolds, processFlightWaitlist, releaseCheckout } from './allocations.ts';
 import type { CheckoutHold } from './allocations.ts';
 import type { Payment } from '../shared/types.ts';
 
@@ -96,6 +96,7 @@ payments.post('/holds/:holdId/payments', async (request, response) => {
       await client.query('ROLLBACK');
       fail(response, 409, 'PAYMENT_ALREADY_STARTED', 'This hold already has a payment.', [], existing.rows[0].id); return;
     }
+    const accepted = await acceptedCheckout(client, hold);
     const time = await client.query<{ checked_at: Date }>('SELECT clock_timestamp() AS checked_at');
     const checkedAt = time.rows[0].checked_at;
     const flight = flights.rows[0];
@@ -104,7 +105,7 @@ payments.post('/holds/:holdId/payments', async (request, response) => {
     if (hold.expires_at <= checkedAt) { code = 'HOLD_EXPIRED'; message = 'Your seat hold has expired.'; }
     else if (hold.status !== 'ACTIVE') { code = 'HOLD_NOT_ACTIVE'; message = 'This hold cannot start another checkout.'; }
     else if (flight.status !== 'SCHEDULED' || flight.departure_at <= checkedAt) { code = 'FLIGHT_NOT_BOOKABLE'; message = 'This flight is no longer bookable.'; }
-    else if (hold.source === 'WAITLIST') { code = 'OFFER_NOT_ACCEPTED'; message = 'Accept your waitlist offer first.'; }
+    else if (!accepted) { code = 'OFFER_NOT_ACCEPTED'; message = 'Accept your waitlist offer first.'; }
     const claim = await client.query('SELECT seat_id FROM seat_allocations WHERE hold_id = $1 AND account_id = $2 AND flight_id = $3 AND seat_id = $4',
       [hold.id, user.id, flightId, hold.seat_id]);
     if (!code && !claim.rowCount) { code = 'HOLD_NOT_ACTIVE'; message = 'This hold no longer owns its seat.'; }
@@ -143,6 +144,7 @@ export async function processDuePayments() {
       const hold = holds.rows[0];
       const claims = await client.query('SELECT seat_id FROM seat_allocations WHERE hold_id = $1 AND account_id = $2 AND flight_id = $3 AND seat_id = $4 FOR UPDATE',
         [hold.id, hold.account_id, hold.flight_id, hold.seat_id]);
+      const accepted = await acceptedCheckout(client, hold);
       const time = await client.query<{ checked_at: Date }>('SELECT clock_timestamp() AS checked_at');
       const checkedAt = time.rows[0].checked_at;
       if (payment.due_at > checkedAt) { await client.query('COMMIT'); continue; }
@@ -153,7 +155,7 @@ export async function processDuePayments() {
         await client.query("UPDATE payments SET status = 'FAILED', completed_at = $2, reason = 'Simulated payment failure.' WHERE id = $1", [payment.id, checkedAt]);
       } else {
         const valid = hold.status === 'PAYMENT_PENDING' && hold.expires_at > checkedAt
-          && flight.status === 'SCHEDULED' && flight.departure_at > checkedAt && claims.rowCount === 1 && hold.source === 'DIRECT';
+          && flight.status === 'SCHEDULED' && flight.departure_at > checkedAt && claims.rowCount === 1 && accepted;
         if (valid) {
           if (payment.amount_paise !== hold.quote_paise) throw new Error('Payment and hold amounts differ.');
           await confirmCheckout(client, hold, payment.id, checkedAt);
@@ -164,6 +166,7 @@ export async function processDuePayments() {
           await client.query("UPDATE payments SET status = 'VOIDED', completed_at = $2, reason = 'The hold expired or the flight or seat is no longer available.' WHERE id = $1", [payment.id, checkedAt]);
         }
       }
+      await processFlightWaitlist(client, hold.flight_id);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');

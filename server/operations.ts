@@ -1,7 +1,7 @@
 import type { PoolClient } from 'pg';
-import type { Hold, Payment, Booking } from '../shared/types.ts';
+import type { Hold, Payment, Booking, WaitlistEntry, OfferAcceptance } from '../shared/types.ts';
 
-type OperationData = Hold | Payment | Booking;
+type OperationData = Hold | Payment | Booking | WaitlistEntry | OfferAcceptance;
 
 type SavedOperation = { matches: boolean; http_status: number | null; data: OperationData | null };
 

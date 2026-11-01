@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Flight, Hold, Payment, StartPaymentInput, User } from '../../shared/types.ts';
-import { loadFlight, loadHold, loadPayment, releaseHold, startPayment } from './api.ts';
+import { loadFlight, loadHold, loadPayment, loadWaitlistEntry, releaseHold, startPayment, withdrawWaitlist } from './api.ts';
 import { flightDate, flightTime, money } from './display.ts';
 import { HoldSummary } from './HoldSummary.tsx';
 import { PaymentDialog } from './PaymentDialog.tsx';
@@ -25,9 +25,10 @@ function readSavedPayment(key: string): SavedPayment | null {
   } catch { return null; }
 }
 
-export function Checkout({ holdId, user, onLogin, onSessionExpired, onBooking, onCabin }: {
+export function Checkout({ holdId, user, onLogin, onSessionExpired, onBooking, onCabin, onEntry }: {
   holdId: string; user: User | null; onLogin: () => void; onSessionExpired: () => void;
   onBooking: (id: string) => void; onCabin: (id: string) => void;
+  onEntry: (id: string) => void;
 }) {
   const storageKey = `flightsure:payment:${user?.id ?? 'guest'}:${holdId}`;
   const [saved, setSaved] = useState(() => readSavedPayment(storageKey));
@@ -90,6 +91,11 @@ export function Checkout({ holdId, user, onLogin, onSessionExpired, onBooking, o
       try {
         const state = await loadHold(holdId);
         const details = await loadFlight(state.hold.flightId);
+        if (state.hold.waitlistEntryId && !state.hold.paymentId && !state.hold.bookingId) {
+          const offer = await loadWaitlistEntry(state.hold.waitlistEntryId);
+          if (!active) return;
+          if (!offer.entry.acceptedAt) { onEntry(offer.entry.id); return; }
+        }
         if (!active) return;
         setHoldState(state); setFlight(details);
         if (state.hold.bookingId) { onBooking(state.hold.bookingId); return; }
@@ -151,7 +157,8 @@ export function Checkout({ holdId, user, onLogin, onSessionExpired, onBooking, o
     try {
       const key = sessionStorage.getItem(keyName) ?? crypto.randomUUID();
       sessionStorage.setItem(keyName, key);
-      await releaseHold(holdId, key);
+      if (holdState.hold.waitlistEntryId) await withdrawWaitlist(holdState.hold.waitlistEntryId, key);
+      else await releaseHold(holdId, key);
       sessionStorage.removeItem(keyName);
       setHoldState(await loadHold(holdId));
     } catch (error) { report(error); }
@@ -170,7 +177,7 @@ export function Checkout({ holdId, user, onLogin, onSessionExpired, onBooking, o
         <p className="text-xs font-semibold tracking-widest text-primary">{flight.flightNumber} · {flightDate(flight.departureAt)}</p>
         <h2 className="mt-2 text-xl font-semibold">{flight.origin.name} → {flight.destination.name}</h2>
         <p className="mt-2 text-sm text-muted-foreground">Departure {flightTime(flight.departureAt)} IST · Seat {holdState.hold.seat.label}</p>
-        <HoldSummary {...holdState} busy={busy} onRelease={() => void release()} onExpire={() => void refreshHold()} />
+        <HoldSummary {...holdState} busy={busy} onRelease={() => void release()} onExpire={() => void refreshHold()} releaseLabel={holdState.hold.waitlistEntryId ? 'Decline offer' : undefined} />
       </Card>
       <Card>
         <h2 className="text-xl font-semibold">{paymentId ? 'Payment status' : 'Passenger details'}</h2>

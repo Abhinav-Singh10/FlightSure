@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Flight, SeatMap } from '../../shared/types.ts';
+import type { Flight, SeatMap, User } from '../../shared/types.ts';
+import { JoinWaitlist } from './JoinWaitlist.tsx';
 import { loadFlight, loadSeats } from './api.ts';
 import { flightDate, flightTime, money } from './display.ts';
 import { Button } from './components/ui/button.tsx';
@@ -9,10 +10,12 @@ export function FlightDetails({
   id,
   onBack,
   onViewSeats,
+  user, onLogin, onSessionExpired, onEntry, onBooking,
 }: {
   id: string;
   onBack: () => void;
   onViewSeats: () => void;
+  user: User | null; onLogin: () => void; onSessionExpired: () => void; onEntry: (id: string) => void; onBooking: (id: string) => void;
 }) {
   const [flight, setFlight] = useState<Flight | null>(null);
   const [seats, setSeats] = useState<SeatMap | null>(null);
@@ -142,6 +145,7 @@ export function FlightDetails({
               View seats <span aria-hidden="true">→</span>
             </Button>
           </div>
+          {flight.bookable && flight.availableSeats === 0 && <div className="mt-5 border-t border-border pt-5"><JoinWaitlist key={user?.id ?? 'guest'} flightId={flight.id} user={user} onLogin={onLogin} onSessionExpired={onSessionExpired} onEntry={onEntry} onBooking={onBooking} onCabin={onViewSeats} /></div>}
         </Card>
       )}
     </section>
