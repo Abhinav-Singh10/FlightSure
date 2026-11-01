@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { pool } from './db.ts';
+import { readSession } from './session.ts';
 import { fail, meta } from './http.ts';
 import { formatIst, isCalendarDate, todayInIst } from './time.ts';
 import type { Airport, Flight, SeatMap } from '../shared/types.ts';
@@ -33,10 +34,19 @@ type FlightRow = {
   available_seats: number;
 };
 
-// Until holds/bookings are added, all physical seats are available.
+flights.use((_request, response, next) => {
+  response.set('Cache-Control', 'no-store');
+  next();
+});
+
 const flightSelect = `
   SELECT f.*, origin_airport.name AS origin_name, destination_airport.name AS destination_name,
-    (SELECT count(*)::int FROM flight_seats WHERE flight_id = f.id) AS available_seats
+    (SELECT count(*)::int FROM flight_seats s
+     WHERE s.flight_id = f.id AND NOT EXISTS (
+       SELECT 1 FROM seat_allocations a JOIN holds h ON h.id = a.hold_id
+       WHERE a.seat_id = s.id AND h.status IN ('ACTIVE', 'PAYMENT_PENDING')
+         AND h.expires_at > clock_timestamp()
+     )) AS available_seats
   FROM flights f
   JOIN airports origin_airport ON origin_airport.code = f.origin
   JOIN airports destination_airport ON destination_airport.code = f.destination
@@ -140,6 +150,7 @@ flights.get('/:flightId', async (request, response) => {
 flights.get('/:flightId/seats', async (request, response) => {
   z.object({}).strict().parse(request.query);
   const { flightId } = flightPath.parse(request.params);
+  const context = await readSession(request);
   const layoutResult = await pool.query<{
     name: string;
     columns: string[];
@@ -158,9 +169,17 @@ flights.get('/:flightId/seats', async (request, response) => {
     label: string;
     row_number: number;
     column_letter: string;
+    is_held: boolean;
+    is_mine: boolean;
   }>(
-    'SELECT id, label, row_number, column_letter FROM flight_seats WHERE flight_id = $1 ORDER BY row_number, column_letter',
-    [flightId],
+    `SELECT s.id, s.label, s.row_number, s.column_letter,
+       h.id IS NOT NULL AS is_held,
+       COALESCE(h.account_id = $2::uuid, false) AS is_mine
+     FROM flight_seats s LEFT JOIN seat_allocations a ON a.seat_id = s.id
+     LEFT JOIN holds h ON h.id = a.hold_id AND h.status IN ('ACTIVE', 'PAYMENT_PENDING')
+       AND h.expires_at > clock_timestamp()
+     WHERE s.flight_id = $1 ORDER BY s.row_number, s.column_letter`,
+    [flightId, context?.user.id ?? null],
   );
   const data: SeatMap = {
     flightId,
@@ -174,8 +193,8 @@ flights.get('/:flightId/seats', async (request, response) => {
       label: seat.label,
       row: seat.row_number,
       column: seat.column_letter,
-      status: 'AVAILABLE',
-      isMine: false,
+      status: seat.is_held ? 'HELD' : 'AVAILABLE',
+      isMine: seat.is_mine,
     })),
   };
   response.json({ data, meta: meta() });

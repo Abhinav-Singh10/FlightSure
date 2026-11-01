@@ -1,5 +1,6 @@
 import type {
   Flight,
+  Hold,
   Pagination,
   SeatMap,
   Session,
@@ -18,11 +19,25 @@ async function request(path: string, options: RequestInit = {}) {
       throw new Error('The backend is unavailable. Please try again shortly.');
     }
     const body: {
-      error?: { message: string; fieldErrors?: { message: string }[] };
+      error?: {
+        message: string;
+        code: string;
+        existingResourceId: string | null;
+        fieldErrors?: { message: string }[];
+      };
     } = await response.json();
     const detail = body.error?.fieldErrors?.[0]?.message;
-    throw new Error(
-      detail || body.error?.message || 'The request failed. Please try again.',
+    throw Object.assign(
+      new Error(
+        detail ||
+          body.error?.message ||
+          'The request failed. Please try again.',
+      ),
+      {
+        status: response.status,
+        code: body.error?.code,
+        existingResourceId: body.error?.existingResourceId,
+      },
     );
   }
   return response;
@@ -79,4 +94,48 @@ export async function loadSeats(id: string) {
   const response = await request(`/flights/${id}/seats`);
   const body: { data: SeatMap } = await response.json();
   return body.data;
+}
+
+export async function loadHold(id: string) {
+  const response = await request(`/holds/${id}`);
+  const body: { data: Hold; meta: { serverTime: string } } =
+    await response.json();
+  return {
+    hold: body.data,
+    serverTime: body.meta.serverTime,
+    receivedAt: Date.now(),
+  };
+}
+
+export async function createHold(
+  flightId: string,
+  seatId: string,
+  key: string,
+) {
+  const response = await request('/holds', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify({ flightId, seatId }),
+  });
+  const body: { data: Hold; meta: { serverTime: string } } =
+    await response.json();
+  return {
+    hold: body.data,
+    serverTime: body.meta.serverTime,
+    receivedAt: Date.now(),
+  };
+}
+
+export async function releaseHold(id: string, key: string) {
+  const response = await request(`/holds/${id}`, {
+    method: 'DELETE',
+    headers: { 'Idempotency-Key': key },
+  });
+  const body: { data: Hold; meta: { serverTime: string } } =
+    await response.json();
+  return {
+    hold: body.data,
+    serverTime: body.meta.serverTime,
+    receivedAt: Date.now(),
+  };
 }

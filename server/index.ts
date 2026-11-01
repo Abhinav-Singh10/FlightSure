@@ -1,5 +1,6 @@
 import { app } from './app.ts';
 import { pool } from './db.ts';
+import { startWorker } from './worker.ts';
 
 const port = Number(process.env.PORT ?? 3000);
 
@@ -8,8 +9,10 @@ if (!Number.isInteger(port)) {
 }
 
 // main server
+let stopWorker: (() => Promise<void>) | undefined;
 const server = app.listen(port, '127.0.0.1', () => {
   console.log(`backend runnin on: http://127.0.0.1:${port}`);
+  stopWorker = startWorker();
 });
 
 // PORT error check
@@ -21,11 +24,14 @@ server.on('error', () => {
 });
 
 function stopServer() {
-  server.close(() => {
-    pool.end().catch(() => {
-      console.error('The database connections could not close cleanly.');
+  server.close(async () => {
+    try {
+      await stopWorker?.();
+      await pool.end();
+    } catch (error) {
+      console.error('Unable to close the backend:', error);
       process.exitCode = 1;
-    });
+    }
   });
 }
 

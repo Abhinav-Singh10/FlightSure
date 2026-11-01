@@ -8,9 +8,11 @@ import { Card } from './components/ui/card.tsx';
 export function FlightDetails({
   id,
   onBack,
+  onViewSeats,
 }: {
   id: string;
   onBack: () => void;
+  onViewSeats: () => void;
 }) {
   const [flight, setFlight] = useState<Flight | null>(null);
   const [seats, setSeats] = useState<SeatMap | null>(null);
@@ -128,6 +130,18 @@ export function FlightDetails({
               </dd>
             </div>
           </dl>
+          <div className="mt-7 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
+            <p className="text-sm text-muted-foreground">
+              {flight.bookable
+                ? flight.availableSeats > 0
+                  ? 'Find your place in the cabin.'
+                  : 'This flight is currently full. You can still view the cabin.'
+                : 'Seat selection is closed for this flight.'}
+            </p>
+            <Button disabled={!flight.bookable} onClick={onViewSeats}>
+              View seats <span aria-hidden="true">→</span>
+            </Button>
+          </div>
         </Card>
       )}
     </section>

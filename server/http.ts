@@ -13,9 +13,10 @@ export function fail(
   code: string,
   message: string,
   fieldErrors: { field: string; message: string }[] = [],
+  existingResourceId: string | null = null,
 ) {
   return response.status(status).json({
-    error: { code, message, fieldErrors, existingResourceId: null },
+    error: { code, message, fieldErrors, existingResourceId },
     meta: meta(),
   });
 }

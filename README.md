@@ -1,6 +1,6 @@
 # FlightSure
 
-Flight reservation project. Includes registration, login, flight search and details.
+Flight reservation project. Includes registration, login, flight search, cabin selection and temporary seat holds.
 
 Requires Node.js 24.17.0 and Docker Desktop running.
 
@@ -22,6 +22,8 @@ Local HTTP cookies use HttpOnly and SameSite=Lax; Secure is enabled when `APP_OR
 
 Login uses a signed JWT containing a session ID, with a 15-minute expiry. The database session identifies the user and records logout; no JWT issuer/audience configuration is needed for this single backend.
 
+Search → Flight details → View seats → Full-screen cabin. Seat holds last up to five minutes, capped at departure. The backend checks expiry every five seconds. Refresh restores the cabin and your hold in the same browser tab. Payments come next.
+
 ## Commands
 
 | Command | Purpose |
@@ -30,14 +32,14 @@ Login uses a signed JWT containing a session ID, with a 15-minute expiry. The da
 | `npm run web` | Start frontend on port 5173 |
 | `npm run typecheck` | Check TypeScript |
 | `npm run build` | Build frontend into `dist` |
-| `npm test` | Run the three Jest tests |
+| `npm test` | Run the five Jest tests |
 | `npm run db:start` | Start PostgreSQL |
 | `npm run db:stop` | Stop PostgreSQL; keep data |
 | `npm run db:migrate` | Apply new database structure changes |
 | `npm run db:seed` | Add admin, airports, flights and seats |
 | `npm run db:shell` | Open SQL terminal; exit with `\q` |
 
-Only the admin is seeded. Passengers register. Seeds start tomorrow in IST, or on `SEED_START_DATE` from `.env`. Admin email/password are in `.env` (defaults in `.env.example`).
+Only the admin is seeded. Passengers register. Each new flight gets 20 rows (A–D), 80 seats and an aisle after B. Rerunning the seed skips existing flights. Seeds start tomorrow in IST, or on `SEED_START_DATE` from `.env`. Admin email/password are in `.env` (defaults in `.env.example`).
 
 ## Tests
 

@@ -4,13 +4,37 @@ import { loadSession, logout } from './api.ts';
 import { AuthForm } from './AuthForm.tsx';
 import { FlightSearch } from './FlightSearch.tsx';
 import { FlightDetails } from './FlightDetails.tsx';
+import { CabinView } from './CabinView.tsx';
+import { AuthDialog } from './AuthDialog.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
+
+function readView() {
+  const query = new URLSearchParams(window.location.search);
+  return {
+    flightId: query.get('flight'),
+    cabin: query.get('view') === 'seats',
+  };
+}
 
 export function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authMode, setAuthMode] = useState<'register' | 'login' | null>(null);
-  const [flightId, setFlightId] = useState<string | null>(null);
+  const [view, setView] = useState(readView);
+  const { flightId } = view;
+  const cabinOpen = view.cabin && flightId !== null;
+
+  function openFlight(id: string | null, cabin = false) {
+    const query = new URLSearchParams();
+    if (id) query.set('flight', id);
+    if (id && cabin) query.set('view', 'seats');
+    window.history.pushState(
+      null,
+      '',
+      query.size ? `?${query}` : window.location.pathname,
+    );
+    setView({ flightId: id, cabin });
+  }
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
 
@@ -32,6 +56,18 @@ export function App() {
     void refreshSession();
   }, []);
 
+  useEffect(() => {
+    function handleBack() {
+      setView(readView());
+    }
+    window.addEventListener('popstate', handleBack);
+    return () => window.removeEventListener('popstate', handleBack);
+  }, []);
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [flightId, cabinOpen]);
+
   async function signOut() {
     if (!session) return;
     setBusy(true);
@@ -49,6 +85,22 @@ export function App() {
       setBusy(false);
     }
   }
+
+  const accountForm =
+    authMode && session && !session.authenticated ? (
+      <AuthForm
+        key={authMode}
+        mode={authMode}
+        onSuccess={(next) => {
+          setSession(next);
+          setAuthMode(null);
+        }}
+        onSwitch={() =>
+          setAuthMode(authMode === 'login' ? 'register' : 'login')
+        }
+        onClose={() => setAuthMode(null)}
+      />
+    ) : null;
 
   return (
     <>
@@ -112,21 +164,29 @@ export function App() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 pb-14 pt-10 sm:px-8 sm:pt-14">
-        <div className="mb-9 max-w-2xl">
-          <p className="mb-3 text-xs font-semibold tracking-[0.18em] text-primary">
-            DELHI · BHOPAL · BANGALORE
-          </p>
-          <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-            Your next journey,
-            <br />
-            <span className="text-primary">a little simpler.</span>
-          </h1>
-          <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-            Explore direct flights, compare schedules, and find the journey that
-            fits your day.
-          </p>
-        </div>
+      <main
+        className={
+          cabinOpen
+            ? 'mx-auto min-h-[calc(100vh-80px)] max-w-[1440px] px-4 pb-10 pt-5 sm:px-8'
+            : 'mx-auto max-w-6xl px-5 pb-14 pt-10 sm:px-8 sm:pt-14'
+        }
+      >
+        {!cabinOpen && (
+          <div className="mb-9 max-w-2xl">
+            <p className="mb-3 text-xs font-semibold tracking-[0.18em] text-primary">
+              DELHI · BHOPAL · BANGALORE
+            </p>
+            <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+              Your next journey,
+              <br />
+              <span className="text-primary">a little simpler.</span>
+            </h1>
+            <p className="mt-4 text-base leading-relaxed text-muted-foreground">
+              Explore direct flights, compare schedules, and find the journey
+              that fits your day.
+            </p>
+          </div>
+        )}
         {error && (
           <div
             role="alert"
@@ -142,62 +202,72 @@ export function App() {
             </Button>
           </div>
         )}
-        <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {cabinOpen && flightId && (
+          <CabinView
+            key={flightId}
+            id={flightId}
+            user={session?.user ?? null}
+            onBack={() => openFlight(flightId)}
+            onLogin={() => setAuthMode('login')}
+            onSessionExpired={() => void refreshSession()}
+          />
+        )}
+        <div
+          className={
+            cabinOpen
+              ? 'hidden'
+              : 'grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]'
+          }
+        >
           <div>
             <div hidden={flightId !== null}>
-              <FlightSearch onOpen={setFlightId} />
+              <FlightSearch onOpen={openFlight} />
             </div>
-            {flightId && (
+            {flightId && !cabinOpen && (
               <FlightDetails
                 key={flightId}
                 id={flightId}
-                onBack={() => setFlightId(null)}
+                onBack={() => openFlight(null)}
+                onViewSeats={() => openFlight(flightId, true)}
               />
             )}
           </div>
           <aside className={authMode ? 'order-first lg:order-last' : ''}>
-            {authMode && session && !session.authenticated ? (
-              <AuthForm
-                key={authMode}
-                mode={authMode}
-                onSuccess={(next) => {
-                  setSession(next);
-                  setAuthMode(null);
-                }}
-                onSwitch={() =>
-                  setAuthMode(authMode === 'login' ? 'register' : 'login')
-                }
-                onClose={() => setAuthMode(null)}
-              />
-            ) : (
-              <Card className="bg-[#edf4f0] shadow-none">
-                <div
-                  aria-hidden="true"
-                  className="mb-5 flex size-11 items-center justify-center rounded-full bg-white text-xl text-primary"
-                >
-                  ↗
-                </div>
-                <h2 className="text-lg font-semibold">
-                  Three cities. More possibilities.
-                </h2>
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                  From a new beginning in Bangalore to a familiar welcome in
-                  Delhi. Find a direct connection to what matters.
-                </p>
-                <div className="mt-6 space-y-4 border-t border-primary/15 pt-5 text-sm">
-                  {['Delhi', 'Bhopal', 'Bangalore'].map((city) => (
-                    <div key={city} className="flex justify-between">
-                      <span>{city}</span>
-                      <span aria-hidden="true" className="text-primary">
-                        ↗
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            )}
+            {!cabinOpen &&
+              (accountForm || (
+                <Card className="bg-[#edf4f0] shadow-none">
+                  <div
+                    aria-hidden="true"
+                    className="mb-5 flex size-11 items-center justify-center rounded-full bg-white text-xl text-primary"
+                  >
+                    ↗
+                  </div>
+                  <h2 className="text-lg font-semibold">
+                    Three cities. More possibilities.
+                  </h2>
+                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                    From a new beginning in Bangalore to a familiar welcome in
+                    Delhi. Find a direct connection to what matters.
+                  </p>
+                  <div className="mt-6 space-y-4 border-t border-primary/15 pt-5 text-sm">
+                    {['Delhi', 'Bhopal', 'Bangalore'].map((city) => (
+                      <div key={city} className="flex justify-between">
+                        <span>{city}</span>
+                        <span aria-hidden="true" className="text-primary">
+                          ↗
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
           </aside>
         </div>
+        {cabinOpen && accountForm && (
+          <AuthDialog onClose={() => setAuthMode(null)}>
+            {accountForm}
+          </AuthDialog>
+        )}
         <footer className="mt-10 border-t border-border pt-5 text-xs text-muted-foreground">
           All flight times are in Indian Standard Time (IST). Fares are in INR.
         </footer>
