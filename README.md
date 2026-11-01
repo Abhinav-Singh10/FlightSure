@@ -18,9 +18,9 @@ npm run dev
 
 In another terminal, run `npm run web`. Open [localhost:5173](http://localhost:5173).
 
-Local HTTP cookies use HttpOnly and SameSite=Lax; Secure is enabled when `APP_ORIGIN` uses HTTPS.
+Login uses a signed JWT containing a session ID, with a 15-minute expiry.
 
-Login uses a signed JWT containing a session ID, with a 15-minute expiry. The database session identifies the user and records logout; no JWT issuer/audience configuration is needed for this single backend.
+The database session identifies the user and records logout.
 
 Search → Flight details → View seats → Full-screen cabin. Seat holds last up to five minutes, capped at departure. The backend checks expiry every five seconds. Refresh restores the cabin and your hold in the same browser tab. Payments come next.
 
@@ -39,7 +39,9 @@ Search → Flight details → View seats → Full-screen cabin. Seat holds last 
 | `npm run db:seed` | Add admin, airports, flights and seats |
 | `npm run db:shell` | Open SQL terminal; exit with `\q` |
 
-Only the admin is seeded. Passengers register. Each new flight gets 20 rows (A–D), 80 seats and an aisle after B. Rerunning the seed skips existing flights. Seeds start tomorrow in IST, or on `SEED_START_DATE` from `.env`. Admin email/password are in `.env` (defaults in `.env.example`).
+Only the admin is seeded. Passengers register. Each new flight gets 20 rows (A–D), 80 seats and an aisle after B. Rerunning the seed skips existing flights.
+
+Seeds start tomorrow in IST, or on `SEED_START_DATE` from `.env`. Admin email/password are in `.env` (defaults in `.env.example`).
 
 ## Tests
 
