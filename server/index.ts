@@ -23,7 +23,10 @@ server.on('error', () => {
   process.exitCode = 1;
 });
 
+let stopping = false;
 function stopServer() {
+  if (stopping) return;
+  stopping = true;
   server.close(async () => {
     try {
       await stopWorker?.();

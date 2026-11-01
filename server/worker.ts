@@ -1,11 +1,17 @@
 import { processExpiredHolds } from './allocations.ts';
+import { processDuePayments } from './payments.ts';
+
+export async function processWorkerPass() {
+  await processExpiredHolds();
+  await processDuePayments();
+}
 
 export function startWorker() {
   let running: Promise<void> | null = null;
   function run() {
     if (running) return;
-    running = processExpiredHolds()
-      .catch((error: unknown) => console.error('Hold expiry failed:', error))
+    running = processWorkerPass()
+      .catch((error: unknown) => console.error('Background processing failed:', error))
       .finally(() => { running = null; });
   }
   run();

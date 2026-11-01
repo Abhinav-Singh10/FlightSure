@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 import type { Server } from 'node:http';
 import type {
   Flight,
+  Booking,
+  Payment,
   Hold,
   Pagination,
   SeatMap,
@@ -50,6 +52,9 @@ afterAll(async () => {
       'DELETE FROM seat_allocations WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))',
       [createdEmails],
     );
+    await pool.query('DELETE FROM booking_assignments WHERE booking_id IN (SELECT id FROM bookings WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[])))', [createdEmails]);
+    await pool.query('DELETE FROM bookings WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
+    await pool.query('DELETE FROM payments WHERE hold_id IN (SELECT id FROM holds WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[])))', [createdEmails]);
     await pool.query(
       'DELETE FROM operations WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))',
       [createdEmails],
@@ -354,4 +359,127 @@ test('competing passengers get one seat owner and expiry permits a new owner', a
     [input.seatId],
   );
   expect(claim.rows[0].hold_id).toBe((await replacement.json()).data.id);
+});
+
+async function registeredPassenger() {
+  const student = browser();
+  const response = await student.request('/auth/register', {
+    method: 'POST', body: JSON.stringify({ email: newEmail(), password }),
+  });
+  expect(response.status).toBe(201);
+  return student;
+}
+
+async function checkoutFixture(student: ReturnType<typeof browser>, origin: string, destination: string) {
+  const found: { data: Flight[] } = await (await student.request(`/flights?origin=${origin}&destination=${destination}&departureDate=${date}`)).json();
+  const flight = found.data[0];
+  const cabin: { data: SeatMap } = await (await student.request(`/flights/${flight.id}/seats`)).json();
+  const input = { flightId: flight.id, seatId: cabin.data.seats[0].id };
+  const response = await student.request('/holds', {
+    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify(input),
+  });
+  expect(response.status).toBe(201);
+  const body: { data: Hold } = await response.json();
+  return { flight, input, hold: body.data };
+}
+
+test('successful payment is retry-safe, confirms one booking and supports cancellation', async () => {
+  const student = await registeredPassenger();
+  const { flight, hold } = await checkoutFixture(student, 'DEL', 'BHO');
+  const key = randomUUID();
+  const options = { method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ outcome: 'SUCCESS', passengerName: 'Demo Passenger', passengerAge: 28 }) };
+  const invalidPassenger = await student.request(`/holds/${hold.id}/payments`, { ...options, body: JSON.stringify({ outcome: 'SUCCESS', passengerName: 'Demo Passenger', passengerAge: 0 }) });
+  expect(invalidPassenger.status).toBe(400);
+  const responses = await Promise.all([
+    student.request(`/holds/${hold.id}/payments`, options), student.request(`/holds/${hold.id}/payments`, options),
+  ]);
+  expect(responses.map((response) => response.status)).toEqual([202, 202]);
+  expect(responses.map((response) => response.headers.get('Idempotency-Replayed')).sort()).toEqual(['false', 'true']);
+  const first: { data: Payment } = await responses[0].json();
+  expect((await responses[1].json()).data.id).toBe(first.data.id);
+  const changed = await student.request(`/holds/${hold.id}/payments`, { ...options, body: JSON.stringify({ outcome: 'FAILURE' }) });
+  expect((await changed.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  const duplicate = await student.request(`/holds/${hold.id}/payments`, { ...options, headers: { 'Idempotency-Key': randomUUID() } });
+  expect((await duplicate.json()).error.existingResourceId).toBe(first.data.id);
+  const pending: { data: Hold } = await (await student.request(`/holds/${hold.id}`)).json();
+  expect(pending.data).toMatchObject({ status: 'PAYMENT_PENDING', paymentId: first.data.id, expiresAt: hold.expiresAt });
+  const { processWorkerPass } = await import('../server/worker.ts');
+  await processWorkerPass();
+  await processWorkerPass();
+  const payment: { data: Payment } = await (await student.request(`/payments/${first.data.id}`)).json();
+  expect(payment.data.status).toBe('SUCCEEDED');
+  const originalResult = await student.request(`/holds/${hold.id}/payments`, options);
+  expect((await originalResult.json()).data).toMatchObject({ id: first.data.id, status: 'PENDING' });
+  const confirmed: { data: Booking } = await (await student.request(`/bookings/${payment.data.bookingId}`)).json();
+  expect(confirmed.data.reference).toMatch(/^FS[A-Z0-9]{8}$/);
+  expect(confirmed.data).toMatchObject({ status: 'CONFIRMED', farePaid: hold.quote, seat: hold.seat, paymentId: first.data.id, passenger: { name: 'Demo Passenger', age: 28 } });
+  const consumed: { data: Hold } = await (await student.request(`/holds/${hold.id}`)).json();
+  expect(consumed.data).toMatchObject({ status: 'CONSUMED', bookingId: confirmed.data.id });
+  const cabin: { data: SeatMap } = await (await student.request(`/flights/${flight.id}/seats`)).json();
+  expect(cabin.data.seats[0]).toMatchObject({ status: 'BOOKED', isMine: true });
+  const occupied: { data: Flight } = await (await student.request(`/flights/${flight.id}`)).json();
+  expect(occupied.data.availableSeats).toBe(79);
+  const history = await (await student.request('/bookings?limit=1')).json();
+  expect(history.pagination).toMatchObject({ total: 1, page: 1, limit: 1 });
+  const other = await registeredPassenger();
+  expect((await other.request(`/payments/${first.data.id}`)).status).toBe(404);
+  expect((await other.request(`/bookings/${confirmed.data.id}`)).status).toBe(404);
+  const cancelOptions = { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: '{}' };
+  const cancelled: { data: Booking } = await (await student.request(`/bookings/${confirmed.data.id}/cancel`, cancelOptions)).json();
+  expect(cancelled.data).toMatchObject({ status: 'CANCELLED', currentFlight: null, seat: null, reference: confirmed.data.reference, cancellationReason: 'Cancelled by passenger.', passenger: confirmed.data.passenger });
+  const replay = await student.request(`/bookings/${confirmed.data.id}/cancel`, cancelOptions);
+  expect(replay.headers.get('Idempotency-Replayed')).toBe('true');
+  expect((await student.request(`/bookings/${confirmed.data.id}/cancel`, { ...cancelOptions, headers: { 'Idempotency-Key': randomUUID() } })).status).toBe(200);
+  const restored: { data: Flight } = await (await student.request(`/flights/${flight.id}`)).json();
+  expect(restored.data.availableSeats).toBe(80);
+  expect((await (await student.request(`/payments/${first.data.id}`)).json()).data.status).toBe('SUCCEEDED');
+  const count = await pool.query<{ count: number }>('SELECT count(*)::int AS count FROM bookings WHERE payment_id = $1', [first.data.id]);
+  expect(count.rows[0].count).toBe(1);
+  const assignments = await pool.query<{ seat_id: string }>('SELECT seat_id FROM booking_assignments WHERE booking_id = $1 AND flight_id = $2', [confirmed.data.id, flight.id]);
+  expect(assignments.rows).toEqual([{ seat_id: hold.seat.id }]);
+});
+
+test('simulated failure releases the hold and a new attempt requires a new hold', async () => {
+  const student = await registeredPassenger();
+  const { hold, flight, input } = await checkoutFixture(student, 'BHO', 'BLR');
+  const options = { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ outcome: 'FAILURE' }) };
+  const started: { data: Payment } = await (await student.request(`/holds/${hold.id}/payments`, options)).json();
+  const { processWorkerPass } = await import('../server/worker.ts');
+  await processWorkerPass();
+  const failed: { data: Payment } = await (await student.request(`/payments/${started.data.id}`)).json();
+  expect(failed.data).toMatchObject({ status: 'FAILED', bookingId: null, reason: 'Simulated payment failure.' });
+  expect(failed.data.completedAt).not.toBeNull();
+  expect((await (await student.request(`/holds/${hold.id}`)).json()).data.status).toBe('FAILED');
+  expect((await (await student.request('/bookings')).json()).data).toEqual([]);
+  const detail: { data: Flight } = await (await student.request(`/flights/${flight.id}`)).json();
+  expect(detail.data.availableSeats).toBe(80);
+  const blocked = await student.request(`/holds/${hold.id}/payments`, { ...options, headers: { 'Idempotency-Key': randomUUID() } });
+  expect((await blocked.json()).error.code).toBe('PAYMENT_ALREADY_STARTED');
+  const replacement = await student.request('/holds', { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify(input) });
+  expect(replacement.status).toBe(201);
+});
+
+test('a restarted worker voids late success without removing the replacement seat claim', async () => {
+  const student = await registeredPassenger();
+  const other = await registeredPassenger();
+  const { hold, input } = await checkoutFixture(student, 'BLR', 'DEL');
+  const started: { data: Payment } = await (await student.request(`/holds/${hold.id}/payments`, {
+    method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ outcome: 'DELAYED_SUCCESS' }),
+  })).json();
+  await pool.query("UPDATE holds SET created_at = clock_timestamp() - interval '6 minutes', expires_at = clock_timestamp() - interval '1 second' WHERE id = $1", [hold.id]);
+  await pool.query("UPDATE payments SET created_at = clock_timestamp() - interval '2 minutes', due_at = clock_timestamp() - interval '1 second' WHERE id = $1", [started.data.id]);
+  const replacement = await other.request('/holds', { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify(input) });
+  expect(replacement.status).toBe(201);
+  const next: { data: Hold } = await replacement.json();
+  // A separate process has no previous timers or payment state to rely on.
+  execFileSync(process.execPath, ['--env-file=.env', '--input-type=module', '-e',
+    "const {processWorkerPass}=await import('./server/worker.ts'); await processWorkerPass(); const {pool}=await import('./server/db.ts'); await pool.end();"],
+    { env: { ...process.env, DATABASE_URL: testUrl }, stdio: 'pipe' });
+  const payment: { data: Payment } = await (await student.request(`/payments/${started.data.id}`)).json();
+  expect(payment.data).toMatchObject({ status: 'VOIDED', bookingId: null });
+  expect(payment.data.reason).toBeTruthy();
+  expect((await (await student.request(`/holds/${hold.id}`)).json()).data.status).toBe('EXPIRED');
+  const claim = await pool.query<{ hold_id: string }>('SELECT hold_id FROM seat_allocations WHERE seat_id = $1', [input.seatId]);
+  expect(claim.rows[0].hold_id).toBe(next.data.id);
+  expect((await (await student.request('/bookings')).json()).data).toEqual([]);
 });

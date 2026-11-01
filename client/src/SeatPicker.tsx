@@ -21,9 +21,10 @@ function readSaved(key: string): SavedHold {
   } catch { return {}; }
 }
 
-export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin, onSessionExpired }: {
+export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin, onSessionExpired, onCheckout, onBooking, onBookings }: {
   flight: Flight; initialSeats: SeatMap; user: User | null;
   onFlightChange: (flight: Flight) => void; onLogin: () => void; onSessionExpired: () => void;
+  onCheckout: (id: string) => void; onBooking: (id: string) => void; onBookings: () => void;
 }) {
   const storageKey = `flightsure:hold:${user?.id ?? 'anonymous'}:${flight.id}`;
   const [saved, setSaved] = useState(() => readSaved(storageKey));
@@ -32,6 +33,7 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
   const [current, setCurrent] = useState<{ hold: Hold; serverTime: string; receivedAt: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [existingBookingId, setExistingBookingId] = useState<string | null>(null);
 
   function save(value: SavedHold) {
     sessionStorage.setItem(storageKey, JSON.stringify(value));
@@ -68,7 +70,9 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
       setCurrent(await loadHold(result.hold.id));
       setSelected('');
     } catch (error) {
-      if (error instanceof Error && 'existingResourceId' in error && typeof error.existingResourceId === 'string') {
+      if (error instanceof Error && 'code' in error && error.code === 'ALREADY_BOOKED' && 'existingResourceId' in error && typeof error.existingResourceId === 'string') {
+        save({}); setSelected(''); setExistingBookingId(error.existingResourceId);
+      } else if (error instanceof Error && 'code' in error && error.code === 'ACTIVE_HOLD_EXISTS' && 'existingResourceId' in error && typeof error.existingResourceId === 'string') {
         save({ holdId: error.existingResourceId });
       } else if (error instanceof Error && 'status' in error && typeof error.status === 'number' && error.status >= 400 && error.status < 500 && error.status !== 401) {
         save({});
@@ -119,10 +123,11 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
   }, [storageKey]);
 
   const hasHold = current?.hold.status === 'ACTIVE' || current?.hold.status === 'PAYMENT_PENDING';
+  const bookedSeat = seats.seats.find((seat) => seat.status === 'BOOKED' && seat.isMine);
   const rows = [...new Set(seats.seats.map((seat) => seat.row))];
   const selectedSeat = seats.seats.find((seat) => seat.id === selected);
-  const seatLabel = selectedSeat?.label ?? (hasHold ? current?.hold.seat.label : undefined);
-  const seatColumn = selectedSeat?.column ?? (hasHold ? seats.seats.find((seat) => seat.id === current?.hold.seat.id)?.column : undefined);
+  const seatLabel = selectedSeat?.label ?? bookedSeat?.label ?? (hasHold ? current?.hold.seat.label : undefined);
+  const seatColumn = selectedSeat?.column ?? bookedSeat?.column ?? (hasHold ? seats.seats.find((seat) => seat.id === current?.hold.seat.id)?.column : undefined);
   const windowSeat = seatColumn === seats.layout.columns[0] || seatColumn === seats.layout.columns.at(-1);
 
   return <div className="cabin-workspace">
@@ -160,9 +165,9 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
               const besideWindow = column === seats.layout.columns[0] || column === seats.layout.columns.at(-1);
               return <Fragment key={column}>
                 {seat ? <button type="button"
-                  aria-label={`Seat ${seat.label}, ${besideWindow ? 'window' : 'aisle'}, ${seat.isMine ? 'held by you' : seat.status.toLowerCase()}`}
+                  aria-label={`Seat ${seat.label}, ${besideWindow ? 'window' : 'aisle'}, ${seat.status.toLowerCase()}${seat.isMine ? ' by you' : ''}`}
                   aria-pressed={chosen}
-                  disabled={busy || hasHold || !flight.bookable || seat.status !== 'AVAILABLE' || Boolean(saved.createKey) || user?.role === 'ADMIN'}
+                  disabled={busy || hasHold || Boolean(bookedSeat) || !flight.bookable || seat.status !== 'AVAILABLE' || Boolean(saved.createKey) || user?.role === 'ADMIN'}
                   onClick={() => { setSelected(seat.id); setError(''); if (!hasHold) setCurrent(null); }}
                   className={`cabin-seat ${chosen || seat.isMine ? 'cabin-seat-selected' : seat.status !== 'AVAILABLE' ? 'cabin-seat-unavailable' : ''}`}>
                   {seat.label}
@@ -200,18 +205,19 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
         </dl>
         {error && <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         <div className="mt-5">
-          {!flight.bookable ? <p className="text-sm">This flight is not currently bookable.</p> : !user ? <Button className="w-full" onClick={onLogin}>Log in to hold a seat</Button> : user.role === 'ADMIN' ? <p className="text-sm text-muted-foreground">Seat holds are available to passenger accounts.</p> : !hasHold && <Button className="w-full" disabled={busy || (!selected && !saved.createKey)} onClick={() => void submitHold()}>{busy ? 'Please wait…' : saved.createKey ? 'Retry seat hold' : selected ? `Hold seat ${selectedSeat?.label}` : 'Select a seat to continue'}</Button>}
+          {!flight.bookable ? <p className="text-sm">This flight is not currently bookable.</p> : !user ? <Button className="w-full" onClick={onLogin}>Log in to hold a seat</Button> : user.role === 'ADMIN' ? <p className="text-sm text-muted-foreground">Seat holds are available to passenger accounts.</p> : bookedSeat ? <Button className="w-full" variant="outline" onClick={onBookings}>View my booked seat {bookedSeat.label}</Button> : !hasHold && <Button className="w-full" disabled={busy || (!selected && !saved.createKey)} onClick={() => void submitHold()}>{busy ? 'Please wait…' : saved.createKey ? 'Retry seat hold' : selected ? `Hold seat ${selectedSeat?.label}` : 'Select a seat to continue'}</Button>}
         </div>
         {flight.bookable && flight.availableSeats === 0 && !hasHold && <p className="mt-3 text-sm">All seats are currently unavailable. Refresh to check for released seats.</p>}
-        {current && <HoldSummary {...current} busy={busy} onRelease={() => void release()} onExpire={() => void refresh().catch(showError)} />}
-        {!hasHold && <p className="mt-4 text-xs leading-5 text-muted-foreground">Selecting a seat does not reserve it. Your seat is reserved temporarily only after the hold succeeds.</p>}
+        {existingBookingId && <Button variant="outline" className="mt-3 w-full" onClick={() => { if (existingBookingId) onBooking(existingBookingId); }}>View existing booking</Button>}
+        {current && <HoldSummary {...current} busy={busy} onRelease={() => void release()} onExpire={() => void refresh().catch(showError)} onCheckout={() => onCheckout(current.hold.id)} onBooking={onBooking} />}
+        {!hasHold && !bookedSeat && <p className="mt-4 text-xs leading-5 text-muted-foreground">Selecting a seat does not reserve it. Your seat is reserved temporarily only after the hold succeeds.</p>}
       </Card>
       <div className="mt-4 rounded-xl border border-border px-5 py-4 text-xs leading-6 text-muted-foreground">
         <p className="font-semibold text-foreground">A little help choosing</p>
         <p>Columns {seats.layout.columns[0]} and {seats.layout.columns.at(-1)} are beside the windows. The space down the middle is the aisle.</p>
       </div>
     </aside>
-    {selectedSeat && !hasHold && <div className="cabin-mobile-action">
+    {selectedSeat && !hasHold && !bookedSeat && <div className="cabin-mobile-action">
       <div><p className="text-xs text-muted-foreground">Your selection</p><p className="font-semibold">Seat {selectedSeat.label} · {money(flight.fare.amountMinor)}</p></div>
       <Button disabled={busy || !flight.bookable} onClick={() => user ? void submitHold() : onLogin()}>{busy ? 'Please wait…' : user ? `Hold seat ${selectedSeat.label}` : 'Log in to hold'}</Button>
     </div>}

@@ -4,6 +4,8 @@ import { pool } from './db.ts';
 import { auth } from './auth.ts';
 import { flights } from './flights.ts';
 import { holds } from './holds.ts';
+import { payments } from './payments.ts';
+import { bookings } from './bookings.ts';
 import { errorHandler, fail } from './http.ts';
 
 export const app = express();
@@ -23,7 +25,9 @@ app.get('/health', async (_request, response) => {
 
 app.use('/api/auth', auth);
 app.use('/api/flights', flights);
+app.use('/api', payments);
 app.use('/api/holds', holds);
+app.use('/api/bookings', bookings);
 app.use('/api', (_request, response) => {
   fail(response, 404, 'NOT_FOUND', 'API route not found.');
 });

@@ -3,7 +3,7 @@ import type { Request, Response } from 'express';
 import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { pool } from './db.ts';
-import { readSession } from './session.ts';
+import { readPassenger } from './session.ts';
 import { fail, meta } from './http.ts';
 import { formatIst } from './time.ts';
 import { expireFlightHolds } from './allocations.ts';
@@ -17,36 +17,25 @@ const operationKey = z.string().uuid();
 
 type HoldRow = {
   id: string; flight_id: string; seat_id: string; label: string;
+  payment_id: string | null; booking_id: string | null;
   source: Hold['source']; status: Hold['status']; expires_at: Date; quote_paise: number;
 };
 type HoldResult = { hold: Hold } | { code: string; message: string; status: number; existingId?: string };
 type FlightRow = { id: string; status: string; departure_at: Date; fare_paise: number };
 
-const holdSelect = `SELECT h.id, h.flight_id, h.seat_id, s.label, h.source, h.quote_paise, h.expires_at,
+const holdSelect = `SELECT h.id, h.flight_id, h.seat_id, s.label, h.source, h.quote_paise, h.expires_at, p.id AS payment_id, b.id AS booking_id,
   CASE WHEN h.status IN ('ACTIVE', 'PAYMENT_PENDING') AND h.expires_at <= clock_timestamp()
     THEN 'EXPIRED' ELSE h.status END AS status
-  FROM holds h JOIN flight_seats s ON s.id = h.seat_id`;
+  FROM holds h JOIN flight_seats s ON s.id = h.seat_id
+  LEFT JOIN payments p ON p.hold_id = h.id LEFT JOIN bookings b ON b.payment_id = p.id`;
 
 function formatHold(row: HoldRow): Hold {
   return {
     id: row.id, flightId: row.flight_id, seat: { id: row.seat_id, label: row.label },
     source: row.source, status: row.status, expiresAt: formatIst(row.expires_at),
     quote: { amountMinor: row.quote_paise, currency: 'INR' },
-    waitlistEntryId: null, paymentId: null, bookingId: null,
+    waitlistEntryId: null, paymentId: row.payment_id, bookingId: row.booking_id,
   };
-}
-
-async function passenger(request: Request, response: Response) {
-  const context = await readSession(request);
-  if (!context) {
-    fail(response, 401, 'UNAUTHENTICATED', 'Please log in to hold a seat.');
-    return null;
-  }
-  if (context.user.role !== 'PASSENGER') {
-    fail(response, 403, 'FORBIDDEN', 'Only passenger accounts can hold seats.');
-    return null;
-  }
-  return context.user;
 }
 
 holds.use((request, response, next) => {
@@ -56,7 +45,7 @@ holds.use((request, response, next) => {
 });
 
 holds.get('/:holdId', async (request, response) => {
-  const user = await passenger(request, response);
+  const user = await readPassenger(request, response);
   if (!user) return;
   const { holdId } = holdPath.parse(request.params);
   const result = await pool.query<HoldRow>(`${holdSelect} WHERE h.id = $1 AND h.account_id = $2`, [holdId, user.id]);
@@ -75,10 +64,13 @@ async function createHold(
   }
   const seats = await client.query('SELECT id FROM flight_seats WHERE id = $1 AND flight_id = $2', [seatId, flight.id]);
   if (!seats.rowCount) return { status: 404, code: 'SEAT_NOT_FOUND', message: 'Seat not found on this flight.' };
-  const current = await client.query<{ hold_id: string }>(
-    'SELECT hold_id FROM seat_allocations WHERE account_id = $1 AND flight_id = $2', [accountId, flight.id],
+  const current = await client.query<{ hold_id: string | null; booking_id: string | null }>(
+    'SELECT hold_id, booking_id FROM seat_allocations WHERE account_id = $1 AND flight_id = $2', [accountId, flight.id],
   );
-  if (current.rows[0]) {
+  if (current.rows[0]?.booking_id) {
+    return { status: 409, code: 'ALREADY_BOOKED', message: 'You already have a booking on this flight.', existingId: current.rows[0].booking_id };
+  }
+  if (current.rows[0]?.hold_id) {
     return { status: 409, code: 'ACTIVE_HOLD_EXISTS', message: 'You already hold a seat on this flight.', existingId: current.rows[0].hold_id };
   }
   const occupied = await client.query('SELECT seat_id FROM seat_allocations WHERE seat_id = $1', [seatId]);
@@ -112,7 +104,7 @@ async function releaseHold(client: PoolClient, accountId: string, holdId: string
 
 // Both mutations use the same order: request key, flight lock, then hold/claim.
 async function changeHold(request: Request, response: Response) {
-  const user = await passenger(request, response);
+  const user = await readPassenger(request, response);
   if (!user) return;
   const key = operationKey.parse(request.get('Idempotency-Key'));
   const releasing = request.method === 'DELETE';

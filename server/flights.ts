@@ -20,7 +20,7 @@ const searchQuery = z
   .strict();
 const flightPath = z.object({ flightId: z.string().uuid() }).strict();
 
-type FlightRow = {
+export type FlightRow = {
   id: string;
   flight_number: string;
   origin: Airport['code'];
@@ -39,20 +39,21 @@ flights.use((_request, response, next) => {
   next();
 });
 
-const flightSelect = `
+export const flightSelect = `
   SELECT f.*, origin_airport.name AS origin_name, destination_airport.name AS destination_name,
     (SELECT count(*)::int FROM flight_seats s
      WHERE s.flight_id = f.id AND NOT EXISTS (
-       SELECT 1 FROM seat_allocations a JOIN holds h ON h.id = a.hold_id
-       WHERE a.seat_id = s.id AND h.status IN ('ACTIVE', 'PAYMENT_PENDING')
-         AND h.expires_at > clock_timestamp()
+       SELECT 1 FROM seat_allocations a LEFT JOIN holds h ON h.id = a.hold_id
+       LEFT JOIN bookings b ON b.id = a.booking_id
+       WHERE a.seat_id = s.id AND (b.status = 'CONFIRMED' OR
+         (h.status IN ('ACTIVE', 'PAYMENT_PENDING') AND h.expires_at > clock_timestamp()))
      )) AS available_seats
   FROM flights f
   JOIN airports origin_airport ON origin_airport.code = f.origin
   JOIN airports destination_airport ON destination_airport.code = f.destination
 `;
 
-function flightData(row: FlightRow): Flight {
+export function flightData(row: FlightRow): Flight {
   return {
     id: row.id,
     flightNumber: row.flight_number,
@@ -170,14 +171,16 @@ flights.get('/:flightId/seats', async (request, response) => {
     row_number: number;
     column_letter: string;
     is_held: boolean;
+    is_booked: boolean;
     is_mine: boolean;
   }>(
     `SELECT s.id, s.label, s.row_number, s.column_letter,
-       h.id IS NOT NULL AS is_held,
-       COALESCE(h.account_id = $2::uuid, false) AS is_mine
+       h.id IS NOT NULL AS is_held, b.id IS NOT NULL AS is_booked,
+       COALESCE(COALESCE(b.account_id, h.account_id) = $2::uuid, false) AS is_mine
      FROM flight_seats s LEFT JOIN seat_allocations a ON a.seat_id = s.id
      LEFT JOIN holds h ON h.id = a.hold_id AND h.status IN ('ACTIVE', 'PAYMENT_PENDING')
        AND h.expires_at > clock_timestamp()
+     LEFT JOIN bookings b ON b.id = a.booking_id AND b.status = 'CONFIRMED'
      WHERE s.flight_id = $1 ORDER BY s.row_number, s.column_letter`,
     [flightId, context?.user.id ?? null],
   );
@@ -193,7 +196,7 @@ flights.get('/:flightId/seats', async (request, response) => {
       label: seat.label,
       row: seat.row_number,
       column: seat.column_letter,
-      status: seat.is_held ? 'HELD' : 'AVAILABLE',
+      status: seat.is_booked ? 'BOOKED' : seat.is_held ? 'HELD' : 'AVAILABLE',
       isMine: seat.is_mine,
     })),
   };

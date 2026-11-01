@@ -58,3 +58,35 @@ export type SeatMap = {
     isMine: boolean;
   }[];
 };
+
+export type StartPaymentInput = {
+  outcome: 'SUCCESS' | 'FAILURE' | 'DELAYED_SUCCESS';
+  delaySeconds?: number;
+  passengerName?: string;
+  passengerAge?: number;
+};
+
+export type Payment = {
+  id: string;
+  holdId: string;
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'VOIDED';
+  amount: Money;
+  bookingId: string | null;
+  reason: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type Booking = {
+  id: string;
+  reference: string;
+  status: 'CONFIRMED' | 'CANCELLED' | 'REBOOKING' | 'UNASSIGNED';
+  originalFlight: Flight;
+  currentFlight: Flight | null;
+  seat: SeatRef | null;
+  farePaid: Money;
+  paymentId: string;
+  confirmedAt: string;
+  cancellationReason: string | null;
+  passenger: { name: string; age: number } | null;
+};

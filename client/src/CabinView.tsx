@@ -6,12 +6,15 @@ import { SeatPicker } from './SeatPicker.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
 
-export function CabinView({ id, user, onBack, onLogin, onSessionExpired }: {
+export function CabinView({ id, user, onBack, onLogin, onSessionExpired, onCheckout, onBooking, onBookings }: {
   id: string;
   user: User | null;
   onBack: () => void;
   onLogin: () => void;
   onSessionExpired: () => void;
+  onCheckout: (id: string) => void;
+  onBooking: (id: string) => void;
+  onBookings: () => void;
 }) {
   const [flight, setFlight] = useState<Flight | null>(null);
   const [seats, setSeats] = useState<SeatMap | null>(null);
@@ -47,6 +50,6 @@ export function CabinView({ id, user, onBack, onLogin, onSessionExpired }: {
     </div>
     {error ? <Card role="alert" className="text-red-800">{error}</Card> : !flight || !seats ? <Card role="status">Loading cabin…</Card> :
       <SeatPicker key={`${id}:${user?.id ?? 'guest'}`} flight={flight} initialSeats={seats} user={user}
-        onFlightChange={setFlight} onLogin={onLogin} onSessionExpired={onSessionExpired} />}
+        onFlightChange={setFlight} onLogin={onLogin} onSessionExpired={onSessionExpired} onCheckout={onCheckout} onBooking={onBooking} onBookings={onBookings} />}
   </section>;
 }

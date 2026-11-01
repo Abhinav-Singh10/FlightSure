@@ -1,5 +1,8 @@
 import type {
   Flight,
+  Payment,
+  Booking,
+  StartPaymentInput,
   Hold,
   Pagination,
   SeatMap,
@@ -138,4 +141,38 @@ export async function releaseHold(id: string, key: string) {
     serverTime: body.meta.serverTime,
     receivedAt: Date.now(),
   };
+}
+
+export async function startPayment(holdId: string, input: StartPaymentInput, key: string) {
+  const response = await request(`/holds/${holdId}/payments`, {
+    method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify(input),
+  });
+  const body: { data: Payment } = await response.json();
+  return body.data;
+}
+
+export async function loadPayment(id: string) {
+  const response = await request(`/payments/${id}`);
+  const body: { data: Payment } = await response.json();
+  return body.data;
+}
+
+export async function loadBooking(id: string) {
+  const response = await request(`/bookings/${id}`);
+  const body: { data: Booking } = await response.json();
+  return body.data;
+}
+
+export async function loadBookings(page = 1) {
+  const response = await request(`/bookings?page=${page}`);
+  const body: { data: Booking[]; pagination: Pagination } = await response.json();
+  return body;
+}
+
+export async function cancelBooking(id: string, key: string) {
+  const response = await request(`/bookings/${id}/cancel`, {
+    method: 'POST', headers: { 'Idempotency-Key': key }, body: '{}',
+  });
+  const body: { data: Booking } = await response.json();
+  return body.data;
 }

@@ -1,6 +1,7 @@
 import type { CookieOptions, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { pool } from './db.ts';
+import { fail } from './http.ts';
 import { formatIst } from './time.ts';
 import type { Session, User } from '../shared/types.ts';
 
@@ -86,4 +87,17 @@ export function setLoginCookie(response: Response, context: SessionContext) {
 
 export function clearLoginCookie(response: Response) {
   response.clearCookie('access_token', cookieOptions);
+}
+
+export async function readPassenger(request: Request, response: Response) {
+  const context = await readSession(request);
+  if (!context) {
+    fail(response, 401, 'UNAUTHENTICATED', 'Please log in to continue.');
+    return null;
+  }
+  if (context.user.role !== 'PASSENGER') {
+    fail(response, 403, 'FORBIDDEN', 'A passenger account is required.');
+    return null;
+  }
+  return context.user;
 }

@@ -6,6 +6,9 @@ import { FlightSearch } from './FlightSearch.tsx';
 import { FlightDetails } from './FlightDetails.tsx';
 import { CabinView } from './CabinView.tsx';
 import { AuthDialog } from './AuthDialog.tsx';
+import { Checkout } from './Checkout.tsx';
+import { BookingDetails } from './BookingDetails.tsx';
+import { MyBookings } from './MyBookings.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
 
@@ -14,6 +17,9 @@ function readView() {
   return {
     flightId: query.get('flight'),
     cabin: query.get('view') === 'seats',
+    page: query.get('view') ?? 'search',
+    holdId: query.get('hold'),
+    bookingId: query.get('booking'),
   };
 }
 
@@ -24,16 +30,25 @@ export function App() {
   const { flightId } = view;
   const cabinOpen = view.cabin && flightId !== null;
 
+  const checkoutOpen = view.page === 'checkout' && view.holdId !== null;
+  const bookingOpen = view.page === 'booking' && view.bookingId !== null;
+  const bookingsOpen = view.page === 'bookings';
+  const focusedView = cabinOpen || checkoutOpen || bookingOpen || bookingsOpen;
+
+  function navigate(query: URLSearchParams) {
+    window.history.pushState(null, '', query.size ? `?${query}` : window.location.pathname);
+    setView(readView());
+  }
+
+  function openCheckout(id: string) { navigate(new URLSearchParams({ view: 'checkout', hold: id })); }
+  function openBooking(id: string) { navigate(new URLSearchParams({ view: 'booking', booking: id })); }
+  function openBookings() { navigate(new URLSearchParams({ view: 'bookings' })); }
+
   function openFlight(id: string | null, cabin = false) {
     const query = new URLSearchParams();
     if (id) query.set('flight', id);
     if (id && cabin) query.set('view', 'seats');
-    window.history.pushState(
-      null,
-      '',
-      query.size ? `?${query}` : window.location.pathname,
-    );
-    setView({ flightId: id, cabin });
+    navigate(query);
   }
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(true);
@@ -66,7 +81,7 @@ export function App() {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [flightId, cabinOpen]);
+  }, [flightId, view.page, view.holdId, view.bookingId]);
 
   async function signOut() {
     if (!session) return;
@@ -125,6 +140,7 @@ export function App() {
           >
             {session?.user ? (
               <>
+                {session.user.role === 'PASSENGER' && <Button variant="ghost" disabled={busy} onClick={openBookings}>My bookings</Button>}
                 <div className="mr-2 max-w-52 truncate">
                   <span className="block truncate font-medium">
                     {session.user.email}
@@ -171,7 +187,7 @@ export function App() {
             : 'mx-auto max-w-6xl px-5 pb-14 pt-10 sm:px-8 sm:pt-14'
         }
       >
-        {!cabinOpen && (
+        {!focusedView && (
           <div className="mb-9 max-w-2xl">
             <p className="mb-3 text-xs font-semibold tracking-[0.18em] text-primary">
               DELHI · BHOPAL · BANGALORE
@@ -210,11 +226,18 @@ export function App() {
             onBack={() => openFlight(flightId)}
             onLogin={() => setAuthMode('login')}
             onSessionExpired={() => void refreshSession()}
+            onCheckout={openCheckout} onBooking={openBooking} onBookings={openBookings}
           />
         )}
+        {checkoutOpen && view.holdId && <Checkout key={`${view.holdId}:${session?.user?.id ?? 'guest'}`} holdId={view.holdId} user={session?.user ?? null}
+          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBooking={openBooking} onCabin={(id) => openFlight(id, true)} />}
+        {bookingOpen && view.bookingId && <BookingDetails key={`${view.bookingId}:${session?.user?.id ?? 'guest'}`} id={view.bookingId} user={session?.user ?? null}
+          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBookings={openBookings} onFlight={openFlight} />}
+        {bookingsOpen && <MyBookings key={session?.user?.id ?? 'guest'} user={session?.user ?? null}
+          onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onOpen={openBooking} onSearch={() => openFlight(null)} />}
         <div
           className={
-            cabinOpen
+            focusedView
               ? 'hidden'
               : 'grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]'
           }
@@ -233,7 +256,7 @@ export function App() {
             )}
           </div>
           <aside className={authMode ? 'order-first lg:order-last' : ''}>
-            {!cabinOpen &&
+            {!focusedView &&
               (accountForm || (
                 <Card className="bg-[#edf4f0] shadow-none">
                   <div
@@ -263,7 +286,7 @@ export function App() {
               ))}
           </aside>
         </div>
-        {cabinOpen && accountForm && (
+        {focusedView && accountForm && (
           <AuthDialog onClose={() => setAuthMode(null)}>
             {accountForm}
           </AuthDialog>

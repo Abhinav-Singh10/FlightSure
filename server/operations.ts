@@ -1,7 +1,9 @@
 import type { PoolClient } from 'pg';
-import type { Hold } from '../shared/types.ts';
+import type { Hold, Payment, Booking } from '../shared/types.ts';
 
-type SavedOperation = { matches: boolean; http_status: number | null; data: Hold | null };
+type OperationData = Hold | Payment | Booking;
+
+type SavedOperation = { matches: boolean; http_status: number | null; data: OperationData | null };
 
 // Reserve the request key before taking a flight lock. Concurrent retries wait
 // here, then read the first request's committed result instead of running twice.
@@ -21,11 +23,11 @@ export async function readOperation(
 }
 
 export async function saveOperation(
-  client: PoolClient, accountId: string, operation: string, key: string, status: number, hold: Hold,
+  client: PoolClient, accountId: string, operation: string, key: string, status: number, data: OperationData,
 ) {
   await client.query(
     `UPDATE operations SET http_status = $4, data = $5
      WHERE account_id = $1 AND operation = $2 AND idempotency_key = $3`,
-    [accountId, operation, key, status, JSON.stringify(hold)],
+    [accountId, operation, key, status, JSON.stringify(data)],
   );
 }
