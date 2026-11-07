@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Hold } from '../shared/types.ts';
 import type { PoolClient } from 'pg';
 import { pool } from './db.ts';
+import { formatIst } from './time.ts';
 
 // The caller locks the flight first and owns the surrounding transaction.
 export async function expireFlightHolds(client: PoolClient, flightId: string, checkedAt: Date) {
@@ -164,4 +165,60 @@ export async function confirmCheckout(client: PoolClient, hold: CheckoutHold, pa
     if (fulfilled.rowCount !== 1) throw new Error('The waitlist offer is no longer accepted.');
   }
   return bookingId;
+}
+
+// Caller owns the transaction. Lock every possible departure in UUID order before
+// the booking, so two recoveries never acquire the same flights in opposite orders.
+export async function recoverBooking(client: PoolClient, taskId: string, bookingId: string, cancelledFlightId: string) {
+  const original = await client.query<{ origin: string; destination: string; departure_at: Date }>(
+    'SELECT f.origin, f.destination, f.departure_at FROM bookings b JOIN flights f ON f.id = b.original_flight_id WHERE b.id = $1', [bookingId]);
+  const anchor = original.rows[0];
+  if (!anchor) throw new Error('The recovery booking was not found.');
+  const flights = await client.query<{ id: string; origin: string; destination: string; departure_at: Date; status: string; flight_number: string }>(
+    `SELECT id, origin, destination, departure_at, status, flight_number FROM flights
+     WHERE id = $1 OR (origin = $2 AND destination = $3 AND departure_at BETWEEN $4::timestamptz AND $4::timestamptz + interval '24 hours')
+     ORDER BY id FOR UPDATE`, [cancelledFlightId, anchor.origin, anchor.destination, anchor.departure_at]);
+  const bookings = await client.query<{ id: string; account_id: string; reference: string; status: string }>(
+    'SELECT id, account_id, reference, status FROM bookings WHERE id = $1 FOR UPDATE', [bookingId]);
+  const items = await client.query<{ status: string }>('SELECT status FROM recovery_items WHERE task_id = $1 AND booking_id = $2 FOR UPDATE', [taskId, bookingId]);
+  if (!items.rows[0] || items.rows[0].status !== 'PENDING') return;
+  const booking = bookings.rows[0];
+  if (!booking || booking.status !== 'REBOOKING') throw new Error('The booking is not awaiting recovery.');
+  const task = await client.query<{ reason: string }>('SELECT reason FROM cancellation_tasks WHERE id = $1', [taskId]);
+  const history = await client.query<{ flight_id: string }>('SELECT flight_id FROM booking_assignments WHERE booking_id = $1', [bookingId]);
+  const candidates = flights.rows.filter((flight) => flight.origin === anchor.origin && flight.destination === anchor.destination
+    && flight.departure_at >= anchor.departure_at && flight.departure_at.getTime() <= anchor.departure_at.getTime() + 24 * 60 * 60 * 1000
+    && flight.status === 'SCHEDULED' && !history.rows.some((assigned) => assigned.flight_id === flight.id));
+  candidates.sort((a, b) => a.departure_at.getTime() - b.departure_at.getTime() || a.id.localeCompare(b.id));
+  let replacement: { id: string; departure_at: Date; flight_number: string } | null = null;
+  for (const flight of candidates) {
+    await processFlightWaitlist(client, flight.id);
+    const time = await client.query<{ checked_at: Date }>('SELECT clock_timestamp() AS checked_at');
+    if (flight.departure_at <= time.rows[0].checked_at) continue;
+    const owned = await client.query('SELECT seat_id FROM seat_allocations WHERE flight_id = $1 AND account_id = $2', [flight.id, booking.account_id]);
+    if (owned.rowCount) continue;
+    const seats = await client.query<{ id: string }>(`SELECT s.id FROM flight_seats s WHERE s.flight_id = $1
+      AND NOT EXISTS (SELECT 1 FROM seat_allocations a WHERE a.seat_id = s.id)
+      ORDER BY s.row_number, s.column_letter, s.id LIMIT 1`, [flight.id]);
+    const seat = seats.rows[0];
+    if (!seat) continue;
+    await client.query("UPDATE bookings SET status = 'CONFIRMED', current_flight_id = $2, seat_id = $3, cancellation_reason = NULL WHERE id = $1", [bookingId, flight.id, seat.id]);
+    await client.query('INSERT INTO booking_assignments (booking_id, flight_id, seat_id, assigned_at) VALUES ($1, $2, $3, $4)',
+      [bookingId, flight.id, seat.id, time.rows[0].checked_at]);
+    await client.query('INSERT INTO seat_allocations (seat_id, flight_id, account_id, booking_id) VALUES ($1, $2, $3, $4)', [seat.id, flight.id, booking.account_id, bookingId]);
+    replacement = flight;
+    break;
+  }
+  if (!replacement) {
+    await client.query("UPDATE bookings SET status = 'UNASSIGNED', current_flight_id = NULL, seat_id = NULL, cancellation_reason = $2 WHERE id = $1", [bookingId, task.rows[0].reason]);
+  }
+  const outcome = replacement ? 'REBOOKED' : 'UNASSIGNED';
+  const type = replacement ? 'REBOOKED' : 'NO_ALTERNATIVE';
+  await client.query('UPDATE recovery_items SET status = $3 WHERE task_id = $1 AND booking_id = $2', [taskId, bookingId, outcome]);
+  const message = replacement
+    ? `Booking ${booking.reference} has moved to ${replacement.flight_number}, departing ${formatIst(replacement.departure_at)} IST. Your reference and paid fare stay the same.`
+    : `No replacement was available for booking ${booking.reference} within 24 hours of its original departure. Your booking remains in My bookings without a seat assignment.`;
+  await client.query(`INSERT INTO notifications (account_id, event_key, type, message, flight_id, booking_id, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, clock_timestamp()) ON CONFLICT (account_id, event_key) DO NOTHING`,
+  [booking.account_id, `cancellation:${taskId}:${bookingId}:${type}`, type, message, replacement?.id ?? cancelledFlightId, bookingId]);
 }

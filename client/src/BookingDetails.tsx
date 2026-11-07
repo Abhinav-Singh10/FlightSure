@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Booking, User } from '../../shared/types.ts';
 import { cancelBooking, loadBooking } from './api.ts';
 import { flightDate, flightTime, money } from './display.ts';
 import { AuthDialog } from './AuthDialog.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
+import { pollWhileVisible } from './polling.ts';
 
 export function BookingDetails({
   id,
@@ -25,6 +26,9 @@ export function BookingDetails({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const refreshRequest = useRef<() => void>(() => {});
+  const revision = useRef(0);
+  const cancelling = useRef(false);
 
   function report(error: unknown) {
     setError(
@@ -36,32 +40,29 @@ export function BookingDetails({
     }
   }
 
-  async function refresh() {
-    setError('');
-    try {
-      setBooking(await loadBooking(id));
-    } catch (error) {
-      report(error);
-    }
-  }
-
   useEffect(() => {
     if (!user || user.role !== 'PASSENGER') return;
     let active = true;
-    loadBooking(id)
-      .then((next) => {
-        if (active) setBooking(next);
-      })
-      .catch((error: unknown) => {
-        if (active) report(error);
-      });
+    let rebooking = false;
+    async function load() {
+      if (cancelling.current) return;
+      const version = revision.current;
+      try {
+        const next = await loadBooking(id);
+        if (!active || version !== revision.current) return;
+        setBooking(next); setError(''); rebooking = next.status === 'REBOOKING';
+      } catch (error) { if (active && version === revision.current) report(error); }
+    }
+    const polling = pollWhileVisible(load, () => rebooking);
+    refreshRequest.current = () => void polling.refresh();
     return () => {
-      active = false;
+      active = false; polling.stop();
     };
   }, [id, user?.id]);
 
   async function cancel() {
     if (!user) return;
+    cancelling.current = true; revision.current += 1;
     setBusy(true);
     setError('');
     const storageKey = `flightsure:cancel:${user.id}:${id}`;
@@ -75,6 +76,7 @@ export function BookingDetails({
       report(error);
       setConfirming(false);
     } finally {
+      cancelling.current = false; revision.current += 1;
       setBusy(false);
     }
   }
@@ -99,16 +101,14 @@ export function BookingDetails({
         Date.now());
   return (
     <section className="mx-auto max-w-3xl space-y-5">
-      <Button variant="ghost" className="px-0" onClick={onBookings}>
-        ← My bookings
-      </Button>
+      <div className="flex items-center justify-between gap-3"><Button variant="ghost" className="px-0" onClick={onBookings}>← My bookings</Button><Button variant="outline" disabled={busy} onClick={() => refreshRequest.current()}>Refresh</Button></div>
       {error && (
         <Card role="alert" className="text-red-800">
           {error}
           <Button
             variant="outline"
             className="ml-3"
-            onClick={() => void refresh()}
+            onClick={() => refreshRequest.current()}
           >
             Refresh booking
           </Button>
@@ -133,17 +133,19 @@ export function BookingDetails({
             </p>
             <h1 className="mt-4 text-xl font-semibold">
               {booking.status === 'CONFIRMED'
-                ? 'Booking confirmed'
+                ? booking.currentFlight?.id !== booking.originalFlight.id ? 'Replacement flight confirmed' : 'Booking confirmed'
                 : booking.status === 'CANCELLED'
                   ? 'Booking cancelled'
-                  : `Booking ${booking.status.toLowerCase()}`}
+                  : booking.status === 'REBOOKING' ? 'We’re finding another flight' : 'No replacement flight available'}
             </h1>
             <p className="mt-2 text-sm">
               {booking.status === 'CONFIRMED'
-                ? 'Your seat is confirmed. You can find this journey in My bookings.'
-                : (booking.cancellationReason ??
-                  'Check this page for the latest booking status.')}
+                ? booking.currentFlight?.id !== booking.originalFlight.id ? 'Your journey has moved to another flight. Your reference, passenger details and paid fare stay the same.' : 'Your seat is confirmed. You can find this journey in My bookings.'
+                : booking.status === 'REBOOKING' ? 'Your flight was cancelled. We’re checking for a replacement within 24 hours of the original departure. This page updates automatically.'
+                : booking.status === 'UNASSIGNED' ? 'No eligible replacement was available. Your booking and payment remain in history without a seat assignment. You can cancel this unassigned booking.'
+                : booking.cancellationReason ?? 'Check this page for the latest booking status.'}
             </p>
+            {(booking.status === 'REBOOKING' || booking.status === 'UNASSIGNED') && booking.cancellationReason && <p className="mt-3 text-sm text-muted-foreground">Cancellation reason: {booking.cancellationReason}</p>}
           </Card>
           <Card>
             <h2 className="text-xl font-semibold">
@@ -201,8 +203,9 @@ export function BookingDetails({
                 </dd>
               </div>
               <div>
-                <dt className="text-muted-foreground">Original departure</dt>
+                <dt className="text-muted-foreground">Original flight</dt>
                 <dd className="mt-1">
+                  {booking.originalFlight.flightNumber} ·{' '}
                   {flightDate(booking.originalFlight.departureAt)} ·{' '}
                   {flightTime(booking.originalFlight.departureAt)} IST
                 </dd>

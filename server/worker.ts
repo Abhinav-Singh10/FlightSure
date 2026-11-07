@@ -1,10 +1,12 @@
 import { processExpiredHolds, processWaitlists } from './allocations.ts';
 import { processDuePayments } from './payments.ts';
+import { processRecoveries } from './admin.ts';
 
 export async function processWorkerPass() {
   await processExpiredHolds();
   await processDuePayments();
   await processWaitlists();
+  await processRecoveries();
 }
 
 export function startWorker() {

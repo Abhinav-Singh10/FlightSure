@@ -10,6 +10,7 @@ import { Checkout } from './Checkout.tsx';
 import { BookingDetails } from './BookingDetails.tsx';
 import { MyBookings } from './MyBookings.tsx';
 import { WaitlistDetails } from './WaitlistDetails.tsx';
+import { AdminPanel } from './AdminPanel.tsx';
 import { Button } from './components/ui/button.tsx';
 import { Card } from './components/ui/card.tsx';
 
@@ -22,6 +23,7 @@ function readView() {
     holdId: query.get('hold'),
     bookingId: query.get('booking'),
     entryId: query.get('entry'),
+    taskId: query.get('task'),
     tab: query.get('tab') === 'waitlist' ? 'waitlist' : query.get('tab') === 'messages' ? 'messages' : 'bookings',
   };
 }
@@ -37,7 +39,8 @@ export function App() {
   const bookingOpen = view.page === 'booking' && view.bookingId !== null;
   const bookingsOpen = view.page === 'bookings';
   const waitlistOpen = view.page === 'waitlist' && view.entryId !== null;
-  const focusedView = cabinOpen || checkoutOpen || bookingOpen || bookingsOpen || waitlistOpen;
+  const adminOpen = view.page === 'admin';
+  const focusedView = cabinOpen || checkoutOpen || bookingOpen || bookingsOpen || waitlistOpen || adminOpen;
 
   function navigate(query: URLSearchParams) {
     window.history.pushState(null, '', query.size ? `?${query}` : window.location.pathname);
@@ -49,6 +52,9 @@ export function App() {
   function openBookings() { navigate(new URLSearchParams({ view: 'bookings' })); }
   function openTab(tab: string) { navigate(new URLSearchParams(tab === 'bookings' ? { view: 'bookings' } : { view: 'bookings', tab })); }
   function openEntry(id: string) { navigate(new URLSearchParams({ view: 'waitlist', entry: id })); }
+  function openAdmin() { navigate(new URLSearchParams({ view: 'admin' })); }
+  function openAdminFlight(id: string) { navigate(new URLSearchParams({ view: 'admin', flight: id })); }
+  function openTask(id: string) { navigate(new URLSearchParams({ view: 'admin', task: id })); }
 
   function openFlight(id: string | null, cabin = false) {
     const query = new URLSearchParams();
@@ -87,7 +93,7 @@ export function App() {
 
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [flightId, view.page, view.holdId, view.bookingId, view.entryId, view.tab]);
+  }, [flightId, view.page, view.holdId, view.bookingId, view.entryId, view.tab, view.taskId]);
 
   async function signOut() {
     if (!session) return;
@@ -115,6 +121,7 @@ export function App() {
         onSuccess={(next) => {
           setSession(next);
           setAuthMode(null);
+          if (next.user?.role === 'ADMIN' && view.page !== 'admin') openAdmin();
         }}
         onSwitch={() =>
           setAuthMode(authMode === 'login' ? 'register' : 'login')
@@ -147,6 +154,7 @@ export function App() {
             {session?.user ? (
               <>
                 {session.user.role === 'PASSENGER' && <Button variant="ghost" disabled={busy} onClick={openBookings}>My bookings</Button>}
+                {session.user.role === 'ADMIN' && <><Button variant="ghost" disabled={busy} onClick={openAdmin}>Admin</Button><Button variant="ghost" disabled={busy} onClick={() => openFlight(null)}>Flights</Button></>}
                 <div className="mr-2 max-w-52 truncate">
                   <span className="block truncate font-medium">
                     {session.user.email}
@@ -243,6 +251,9 @@ export function App() {
           onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onOpen={openBooking} onEntry={openEntry} onSearch={() => openFlight(null)} />}
         {waitlistOpen && view.entryId && <WaitlistDetails key={`${view.entryId}:${session?.user?.id ?? 'guest'}`} id={view.entryId} user={session?.user ?? null}
           onLogin={() => setAuthMode('login')} onSessionExpired={() => void refreshSession()} onBack={() => openTab('waitlist')} onCheckout={openCheckout} onBooking={openBooking} onFlight={openFlight} />}
+        {adminOpen && <AdminPanel key={`${session?.user?.id ?? 'guest'}:${flightId ?? ''}:${view.taskId ?? ''}`} user={session?.user ?? null} flightId={flightId} taskId={view.taskId}
+          onSearch={openAdmin} onFlight={openAdminFlight} onTask={openTask} onCabin={(id) => openFlight(id, true)} onLogin={() => setAuthMode('login')}
+          onSessionExpired={() => void refreshSession()} onEntry={openEntry} onBooking={openBooking} />}
         <div
           className={
             focusedView
@@ -254,7 +265,7 @@ export function App() {
             <div hidden={flightId !== null}>
               <FlightSearch onOpen={openFlight} />
             </div>
-            {flightId && !cabinOpen && (
+            {flightId && !cabinOpen && !adminOpen && (
               <FlightDetails
                 key={flightId}
                 id={flightId}

@@ -12,6 +12,7 @@ import type {
   Session,
   WaitlistEntry,
   OfferAcceptance,
+  CancellationTask,
 } from '../shared/types.ts';
 
 const testUrl = process.env.TEST_DATABASE_URL;
@@ -30,6 +31,7 @@ const date = new Date(Date.now() + 330 * 60 * 1000 + 24 * 60 * 60 * 1000)
   .slice(0, 10);
 const password = 'StudentPassword123!';
 const createdEmails: string[] = [];
+const createdFlights: string[] = [];
 let server: Server | undefined;
 let base = '';
 
@@ -56,6 +58,8 @@ afterAll(async () => {
     );
     await pool.query('DELETE FROM notifications WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
     await pool.query('DELETE FROM waitlist_entries WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
+    await pool.query('DELETE FROM recovery_items WHERE task_id IN (SELECT id FROM cancellation_tasks WHERE flight_id = ANY($1::uuid[]))', [createdFlights]);
+    await pool.query('DELETE FROM cancellation_tasks WHERE flight_id = ANY($1::uuid[])', [createdFlights]);
     await pool.query('DELETE FROM booking_assignments WHERE booking_id IN (SELECT id FROM bookings WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[])))', [createdEmails]);
     await pool.query('DELETE FROM bookings WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[]))', [createdEmails]);
     await pool.query('DELETE FROM payments WHERE hold_id IN (SELECT id FROM holds WHERE account_id IN (SELECT id FROM accounts WHERE email = ANY($1::text[])))', [createdEmails]);
@@ -74,6 +78,8 @@ afterAll(async () => {
     await pool.query('DELETE FROM accounts WHERE email = ANY($1::text[])', [
       createdEmails,
     ]);
+    await pool.query('DELETE FROM flight_seats WHERE flight_id = ANY($1::uuid[])', [createdFlights]);
+    await pool.query('DELETE FROM flights WHERE id = ANY($1::uuid[])', [createdFlights]);
   } finally {
     if (server) {
       const runningServer = server;
@@ -557,4 +563,73 @@ test('a full flight offers seats in queue order, expires offers and fulfills one
   const booking: { data: Booking } = await (await second.request(`/bookings/${finished.data.bookingId}`)).json();
   expect(booking.data).toMatchObject({ status: 'CONFIRMED', seat: offerHold.seat, passenger: { name: 'Queued Passenger', age: 24 } });
   expect((await (await second.request('/notifications')).json()).data).toHaveLength(1);
+});
+
+test('administrator cancellation safely recovers one booking and retains an unassigned outcome', async () => {
+  const first = await registeredPassenger();
+  const second = await registeredPassenger();
+  const session: { data: Session } = await (await first.request('/auth/session')).json();
+  const adminEmail = newEmail();
+  await pool.query("INSERT INTO accounts (email, password_hash, role) SELECT $1, password_hash, 'ADMIN' FROM accounts WHERE id = $2", [adminEmail, session.data.user?.id]);
+  const administrator = browser();
+  expect((await administrator.request('/auth/login', { method: 'POST', body: JSON.stringify({ email: adminEmail, password }) })).status).toBe(200);
+  // Use two owned 80-seat fixture flights beyond the seed window.
+  const baseTime = await pool.query<{ departure_at: Date }>("SELECT GREATEST(max(departure_at), clock_timestamp()) + interval '7 days' AS departure_at FROM flights");
+  for (const hours of [0, 4]) {
+    const inserted = await pool.query<{ id: string }>(`INSERT INTO flights (flight_number, origin, destination, departure_at, arrival_at, fare_paise, layout_id)
+      SELECT $1, 'DEL', 'BHO', $2::timestamptz + $3 * interval '1 hour', $2::timestamptz + ($3 + 2) * interval '1 hour', $4, id FROM aircraft_layouts LIMIT 1 RETURNING id`,
+    [`TC${randomUUID().slice(0, 8)}`, baseTime.rows[0].departure_at, hours, hours === 0 ? 450000 : 600001]);
+    createdFlights.push(inserted.rows[0].id);
+    await pool.query(`INSERT INTO flight_seats (flight_id, label, row_number, column_letter)
+      SELECT $1, r::text || c, r, c FROM generate_series(1, 20) r CROSS JOIN unnest(ARRAY['A','B','C','D']) c`, [inserted.rows[0].id]);
+  }
+  const sourceId = createdFlights[0];
+  const targetId = createdFlights[1];
+  const source: { data: SeatMap } = await (await first.request(`/flights/${sourceId}/seats`)).json();
+  const target: { data: SeatMap } = await (await first.request(`/flights/${targetId}/seats`)).json();
+  for (const seat of target.data.seats.slice(1)) {
+    await pool.query(`WITH passenger AS (INSERT INTO accounts (email, password_hash) VALUES ($1, 'test fixture; no login') RETURNING id),
+      held AS (INSERT INTO holds (account_id, flight_id, seat_id, quote_paise, created_at, expires_at)
+      SELECT id, $2, $3, 600001, clock_timestamp(), clock_timestamp() + interval '5 minutes' FROM passenger RETURNING *)
+      INSERT INTO seat_allocations (seat_id, flight_id, account_id, hold_id) SELECT seat_id, flight_id, account_id, id FROM held`, [newEmail(), targetId, seat.id]);
+  }
+  const { processWorkerPass } = await import('../server/worker.ts');
+  const originals: Booking[] = [];
+  for (const [index, passenger] of [first, second].entries()) {
+    const hold: { data: Hold } = await (await passenger.request('/holds', { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ flightId: sourceId, seatId: source.data.seats[index].id }) })).json();
+    const payment: { data: Payment } = await (await passenger.request(`/holds/${hold.data.id}/payments`, { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ outcome: 'SUCCESS', passengerName: 'Recovery Passenger', passengerAge: 25 }) })).json();
+    await processWorkerPass();
+    const paid: { data: Payment } = await (await passenger.request(`/payments/${payment.data.id}`)).json();
+    const booking: { data: Booking } = await (await passenger.request(`/bookings/${paid.data.bookingId}`)).json();
+    originals.push(booking.data);
+  }
+  const options = { method: 'POST', headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ reason: 'Aircraft unavailable' }) };
+  const started = await administrator.request(`/admin/flights/${sourceId}/cancel`, options);
+  expect(started.status).toBe(202);
+  const task: { data: CancellationTask } = await started.json();
+  expect(task.data).toMatchObject({ status: 'PENDING', affectedCount: 2, processedCount: 0 });
+  const replay = await administrator.request(`/admin/flights/${sourceId}/cancel`, options);
+  expect(replay.headers.get('Idempotency-Replayed')).toBe('true');
+  const changed = await administrator.request(`/admin/flights/${sourceId}/cancel`, { ...options, body: JSON.stringify({ reason: 'Different reason' }) });
+  expect((await changed.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  const another = await administrator.request(`/admin/flights/${sourceId}/cancel`, { ...options, headers: { 'Idempotency-Key': randomUUID() }, body: JSON.stringify({ reason: 'Ignored reason' }) });
+  expect((await another.json()).data.id).toBe(task.data.id);
+  expect((await first.request(`/admin/cancellations/${task.data.id}`)).status).toBe(403);
+  expect((await (await first.request(`/bookings/${originals[0].id}`)).json()).data).toMatchObject({ status: 'REBOOKING', currentFlight: null, seat: null });
+  await processWorkerPass(); await processWorkerPass();
+  const completed: { data: CancellationTask } = await (await administrator.request(`/admin/cancellations/${task.data.id}`)).json();
+  expect(completed.data).toMatchObject({ status: 'COMPLETED', affectedCount: 2, processedCount: 2, rebookedCount: 1, unassignedCount: 1, error: null });
+  expect(completed.data.completedAt).not.toBeNull();
+  const rebooked: { data: Booking } = await (await first.request(`/bookings/${originals[0].id}`)).json();
+  expect(rebooked.data).toMatchObject({ id: originals[0].id, reference: originals[0].reference, farePaid: originals[0].farePaid,
+    paymentId: originals[0].paymentId, confirmedAt: originals[0].confirmedAt, passenger: originals[0].passenger,
+    originalFlight: { id: sourceId }, currentFlight: { id: targetId }, seat: { id: target.data.seats[0].id }, cancellationReason: null });
+  const unassigned: { data: Booking } = await (await second.request(`/bookings/${originals[1].id}`)).json();
+  expect(unassigned.data).toMatchObject({ status: 'UNASSIGNED', currentFlight: null, seat: null, reference: originals[1].reference, farePaid: originals[1].farePaid, cancellationReason: 'Aircraft unavailable' });
+  const messages = await (await first.request('/notifications')).json();
+  expect(messages.data.map((message: { type: string }) => message.type).sort()).toEqual(['FLIGHT_CANCELLED', 'REBOOKED']);
+  const otherMessages = await (await second.request('/notifications')).json();
+  expect(otherMessages.data.map((message: { type: string }) => message.type).sort()).toEqual(['FLIGHT_CANCELLED', 'NO_ALTERNATIVE']);
+  const savedReason = await pool.query<{ reason: string }>('SELECT reason FROM cancellation_tasks WHERE id = $1', [task.data.id]);
+  expect(savedReason.rows[0].reason).toBe('Aircraft unavailable');
 });

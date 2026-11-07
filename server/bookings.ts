@@ -78,6 +78,28 @@ bookings.get('/:bookingId', async (request, response) => {
   response.json({ data: booking, meta: meta() });
 });
 
+async function lockAssignedFlight(client: PoolClient, bookingId: string, accountId: string, initialFlightId: string) {
+  let flightId = initialFlightId;
+  while (true) {
+    // A savepoint lets a retry release the old flight/booking locks while keeping
+    // the request key locked. Recovery may have moved this booking since lookup.
+    await client.query('SAVEPOINT assigned_flight');
+    const flights = await client.query<{ departure_at: Date }>('SELECT departure_at FROM flights WHERE id = $1 FOR UPDATE', [flightId]);
+    const result = await client.query<BookingRow>('SELECT * FROM bookings WHERE id = $1 AND account_id = $2 FOR UPDATE', [bookingId, accountId]);
+    const booking = result.rows[0];
+    if (!booking) throw new Error('The owned booking was not found.');
+    const currentFlightId = booking.current_flight_id ?? booking.original_flight_id;
+    if (currentFlightId !== flightId) {
+      await client.query('ROLLBACK TO SAVEPOINT assigned_flight');
+      await client.query('RELEASE SAVEPOINT assigned_flight');
+      flightId = currentFlightId;
+      continue;
+    }
+    await client.query('RELEASE SAVEPOINT assigned_flight');
+    return { booking, flightId, departureAt: flights.rows[0].departure_at };
+  }
+}
+
 bookings.post('/:bookingId/cancel', async (request, response) => {
   const user = await readPassenger(request, response);
   if (!user) return;
@@ -99,20 +121,19 @@ bookings.post('/:bookingId/cancel', async (request, response) => {
       await client.query('COMMIT'); response.set('Idempotency-Replayed', 'true');
       response.status(saved.http_status).json({ data: saved.data, meta: meta() }); return;
     }
-    const flights = await client.query<{ departure_at: Date }>('SELECT departure_at FROM flights WHERE id = $1 FOR UPDATE', [flightId]);
-    const result = await client.query<BookingRow>('SELECT * FROM bookings WHERE id = $1 AND account_id = $2 FOR UPDATE', [bookingId, user.id]);
-    const row = result.rows[0];
+    const locked = await lockAssignedFlight(client, bookingId, user.id, flightId);
+    const row = locked.booking;
     const time = await client.query<{ checked_at: Date }>('SELECT clock_timestamp() AS checked_at');
     if (row.status === 'REBOOKING') {
       await client.query('ROLLBACK'); fail(response, 409, 'RECOVERY_IN_PROGRESS', 'Your booking is being rebooked. Please check it again shortly.'); return;
     }
-    if (row.status === 'CONFIRMED' && flights.rows[0].departure_at <= time.rows[0].checked_at) {
+    if (row.status === 'CONFIRMED' && locked.departureAt <= time.rows[0].checked_at) {
       await client.query('ROLLBACK'); fail(response, 409, 'DEPARTURE_PASSED', 'This flight has already departed.'); return;
     }
     if (row.status !== 'CANCELLED') {
       await client.query('DELETE FROM seat_allocations WHERE booking_id = $1', [bookingId]);
       await client.query("UPDATE bookings SET status = 'CANCELLED', current_flight_id = NULL, seat_id = NULL, cancellation_reason = 'Cancelled by passenger.' WHERE id = $1", [bookingId]);
-      await processFlightWaitlist(client, flightId);
+      await processFlightWaitlist(client, locked.flightId);
     }
     const booking = await readBooking(client, bookingId, user.id);
     if (!booking) throw new Error('The cancelled booking was not found.');

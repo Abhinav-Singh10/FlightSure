@@ -6,6 +6,7 @@ import type {
   WaitlistEntry,
   OfferAcceptance,
   Notification,
+  CancellationTask,
   Hold,
   Pagination,
   SeatMap,
@@ -214,4 +215,18 @@ export async function loadNotifications(page = 1) {
   const response = await request(`/notifications?page=${page}`);
   const body: { data: Notification[]; pagination: Pagination } = await response.json();
   return body;
+}
+
+export async function cancelFlight(flightId: string, reason: string, key: string) {
+  const response = await request(`/admin/flights/${flightId}/cancel`, {
+    method: 'POST', headers: { 'Idempotency-Key': key }, body: JSON.stringify({ reason }),
+  });
+  const body: { data: CancellationTask } = await response.json();
+  return body.data;
+}
+
+export async function loadCancellation(id: string) {
+  const response = await request(`/admin/cancellations/${id}`);
+  const body: { data: CancellationTask } = await response.json();
+  return body.data;
 }

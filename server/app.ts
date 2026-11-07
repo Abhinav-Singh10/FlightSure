@@ -7,6 +7,7 @@ import { holds } from './holds.ts';
 import { payments } from './payments.ts';
 import { bookings } from './bookings.ts';
 import { waitlist } from './waitlist.ts';
+import { admin } from './admin.ts';
 import { errorHandler, fail } from './http.ts';
 
 export const app = express();
@@ -30,6 +31,7 @@ app.use('/api', payments);
 app.use('/api/holds', holds);
 app.use('/api/bookings', bookings);
 app.use('/api', waitlist);
+app.use('/api/admin', admin);
 app.use('/api', (_request, response) => {
   fail(response, 404, 'NOT_FOUND', 'API route not found.');
 });

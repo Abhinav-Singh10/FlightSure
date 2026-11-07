@@ -112,3 +112,16 @@ export type Notification = {
   waitlistEntryId: string | null;
   createdAt: string;
 };
+
+export type CancellationTask = {
+  id: string;
+  flightId: string;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  affectedCount: number;
+  processedCount: number;
+  rebookedCount: number;
+  unassignedCount: number;
+  createdAt: string;
+  completedAt: string | null;
+  error: string | null;
+};

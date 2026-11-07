@@ -101,3 +101,16 @@ export async function readPassenger(request: Request, response: Response) {
   }
   return context.user;
 }
+
+export async function readAdmin(request: Request, response: Response) {
+  const context = await readSession(request);
+  if (!context) {
+    fail(response, 401, 'UNAUTHENTICATED', 'Please log in to continue.');
+    return null;
+  }
+  if (context.user.role !== 'ADMIN') {
+    fail(response, 403, 'FORBIDDEN', 'An administrator account is required.');
+    return null;
+  }
+  return context.user;
+}
