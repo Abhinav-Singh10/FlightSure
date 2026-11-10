@@ -43,17 +43,16 @@ export function BookingDetails({
   useEffect(() => {
     if (!user || user.role !== 'PASSENGER') return;
     let active = true;
-    let rebooking = false;
     async function load() {
       if (cancelling.current) return;
       const version = revision.current;
       try {
         const next = await loadBooking(id);
         if (!active || version !== revision.current) return;
-        setBooking(next); setError(''); rebooking = next.status === 'REBOOKING';
+        setBooking(next); setError('');
       } catch (error) { if (active && version === revision.current) report(error); }
     }
-    const polling = pollWhileVisible(load, () => rebooking);
+    const polling = pollWhileVisible(load);
     refreshRequest.current = () => void polling.refresh();
     return () => {
       active = false; polling.stop();

@@ -48,7 +48,7 @@ export function MyBookings({ tab, user, onTab, onLogin, onSessionExpired, onOpen
         if (error instanceof Error && 'status' in error && error.status === 401) { onSessionExpired(); onLogin(); }
       } finally { if (active) { setBusy(false); setRefreshing(false); } }
     }
-    const polling = pollWhileVisible(load, tab === 'waitlist' || tab === 'messages');
+    const polling = pollWhileVisible(load);
     refresh.current = () => void polling.refresh();
     return () => { active = false; polling.stop(); };
   }, [page, tab, user?.id]);
