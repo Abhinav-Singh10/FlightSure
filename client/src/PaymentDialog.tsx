@@ -15,12 +15,13 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
   const [expiry, setExpiry] = useState('');
   const [cvv, setCvv] = useState('');
   const [cardName, setCardName] = useState(passengerName);
+  const [outcome, setOutcome] = useState<StartPaymentInput['outcome']>('SUCCESS');
   const [error, setError] = useState('');
 
   function pay() {
     const digits = cardNumber.replace(/\s/g, '');
-    if (!['4111111111111111', '4000000000000002', '4000000000003220'].includes(digits)) {
-      setError('Use a demo card number, such as 4111 1111 1111 1111.'); return;
+    if (!/^\d{16}$/.test(digits)) {
+      setError('Enter a 16-digit demo card number.'); return;
     }
     const month = Number(expiry.slice(0, 2));
     const year = Number(expiry.slice(3));
@@ -33,8 +34,6 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
       setError('Enter a name on the card and a three-digit CVV.'); return;
     }
     // Fake card fields stay in this dialog. Only the simulator outcome is submitted.
-    const outcome = digits === '4000000000000002' ? 'FAILURE'
-      : digits === '4000000000003220' ? 'DELAYED_SUCCESS' : 'SUCCESS';
     onPay(outcome);
   }
 
@@ -60,7 +59,7 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
         </div>
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         <label className="block text-sm font-medium">Card number
-          <Input className="mt-2 tabular-nums" placeholder="4111 1111 1111 1111" inputMode="numeric" maxLength={19} required value={cardNumber}
+          <Input className="mt-2 tabular-nums" placeholder="XXXX XXXX XXXX XXXX" inputMode="numeric" maxLength={19} required value={cardNumber}
             onChange={(event) => setCardNumber(event.target.value.replace(/\D/g, '').slice(0, 16).replace(/(\d{4})(?=\d)/g, '$1 '))} />
         </label>
         <div className="grid grid-cols-2 gap-4">
@@ -76,7 +75,18 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
         <label className="block text-sm font-medium">Name on card
           <Input className="mt-2" maxLength={100} required value={cardName} onChange={(event) => setCardName(event.target.value)} />
         </label>
-        <p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-muted-foreground">Test card: <span className="font-medium text-foreground">4111 1111 1111 1111</span><br />Use any future expiry and any three-digit CVV.</p>
+        <label className="block text-sm font-medium">Demo payment result
+          <select className="mt-2 h-10 w-full rounded-lg border border-input bg-white px-3 text-sm" value={outcome}
+            onChange={(event) => {
+              const value = event.target.value;
+              if (value === 'SUCCESS' || value === 'FAILURE' || value === 'DELAYED_SUCCESS') setOutcome(value);
+            }}>
+            <option value="SUCCESS">Success</option>
+            <option value="FAILURE">Failure</option>
+            <option value="DELAYED_SUCCESS">Success after 30 seconds</option>
+          </select>
+        </label>
+        <p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-muted-foreground">Use any 16-digit fake card number, a current or future expiry and any three-digit CVV. The demo payment result controls the simulation.</p>
         <Button type="submit" className="w-full bg-blue-600 text-white hover:bg-blue-700">Pay {money(amount)}</Button>
         <p className="text-center text-[11px] text-muted-foreground">FlightSure demo checkout · Card details are not saved</p>
       </form>
