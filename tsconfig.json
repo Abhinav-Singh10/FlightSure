@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["server/**/*.ts", "database/**/*.ts", "shared/**/*.ts", "client/**/*.ts", "client/**/*.tsx", "tests/**/*.ts", "vite.config.ts"]
+  "include": ["server/**/*.ts", "database/**/*.ts", "demo/**/*.ts", "shared/**/*.ts", "client/**/*.ts", "client/**/*.tsx", "tests/**/*.ts", "vite.config.ts"]
 }

@@ -126,10 +126,13 @@ payments.post('/holds/:holdId/payments', async (request, response) => {
   finally { client.release(); }
 });
 
-export async function processDuePayments() {
+export async function processDuePayments(paymentIds?: string[]) {
   const candidates = await pool.query<{ id: string; hold_id: string; flight_id: string }>(
     `SELECT p.id, p.hold_id, h.flight_id FROM payments p JOIN holds h ON h.id = p.hold_id
-     WHERE p.status = 'PENDING' AND p.due_at <= clock_timestamp() ORDER BY p.due_at, p.id LIMIT 25`,
+     WHERE p.status = 'PENDING' AND p.due_at <= clock_timestamp()
+       AND ($1::uuid[] IS NULL OR p.id = ANY($1::uuid[]))
+     ORDER BY p.due_at, p.id LIMIT 25`,
+    [paymentIds ?? null], // Demo preparation can process only its own payments.
   );
   for (const candidate of candidates.rows) {
     const client = await pool.connect();

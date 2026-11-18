@@ -13,6 +13,7 @@
     "db:stop": "docker compose stop",
     "db:migrate": "tsx --env-file=.env database/migrate.ts",
     "db:seed": "tsx --env-file=.env database/seed.ts",
+    "demo:prepare": "tsx --env-file=.env demo/prepare.ts",
     "db:shell": "docker compose exec postgres psql -U flightsure -d flightsure",
     "web": "vite",
     "test": "node --env-file=.env --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
