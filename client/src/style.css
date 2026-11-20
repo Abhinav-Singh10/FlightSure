@@ -44,7 +44,7 @@ button:disabled {
   background: #c6e7db;
 }
 
-/* The cabin is drawn with HTML/CSS; seat positions still come from the API. */
+/* Rows run left-to-right and columns stack vertically; seat data comes from the API. */
 .cabin-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 330px;
@@ -52,6 +52,7 @@ button:disabled {
   align-items: start;
 }
 .cabin-canvas {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 20px;
@@ -61,75 +62,108 @@ button:disabled {
   position: sticky;
   top: 24px;
 }
+.cabin-scroll-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 20px;
+  font-size: 12px;
+  color: var(--color-muted-foreground);
+}
+.aircraft-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-behavior: smooth;
+  scrollbar-color: #9ca3af #f3f4f6;
+  scrollbar-width: thin;
+}
+.aircraft-scroll:focus-visible {
+  outline: 3px solid var(--color-ring);
+  outline-offset: -3px;
+}
 .aircraft-stage {
   position: relative;
   isolation: isolate;
-  padding: 28px 12px 24px;
-  background: radial-gradient(
-    ellipse at center,
-    #eaf3f0 0%,
-    #f7faf9 65%,
-    #fff 100%
-  );
+  display: flex;
+  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  padding: 28px 20px;
+  background: #fff;
 }
 .aircraft-wings,
 .aircraft-tail-wings {
   position: absolute;
-  z-index: -1;
-  width: 100%;
-  left: 0;
-  fill: #e0eae7;
-  stroke: #b9ccc6;
+  z-index: 0;
+  top: 0;
+  height: 100%;
+  fill: #f3f4f6;
+  stroke: #d1d5db;
   stroke-width: 1.5;
 }
 .aircraft-wings {
-  top: calc(50% - 240px);
-  height: 500px;
+  left: 36%;
+  width: 480px;
 }
 .aircraft-tail-wings {
-  bottom: 20px;
-  height: 200px;
+  right: 20px;
+  width: 180px;
 }
 .aircraft-body {
   position: relative;
-  width: min(340px, calc(100% - 24px));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 16px;
+  width: max-content;
   margin: 0 auto;
-  padding: 144px 8px 100px;
-  border: 2px solid #cbdad5;
-  border-radius: 170px 170px 112px 112px / 180px 180px 120px 120px;
-  background: linear-gradient(90deg, #edf2f0, #fff 13%, #fff 87%, #edf2f0);
+  padding: 20px 100px 20px 132px;
+  border: 2px solid #d1d5db;
+  border-radius: 160px 100px 100px 160px;
+  background: linear-gradient(180deg, #f3f4f6, #fff 13%, #fff 87%, #f3f4f6);
   box-shadow:
-    0 12px 28px #223e3210,
+    0 12px 28px #1118270a,
     inset 0 0 0 5px #ffffff90;
 }
 .aircraft-cockpit {
   position: absolute;
-  top: 68px;
-  left: 50%;
+  top: 50%;
+  left: 42px;
   display: flex;
-  gap: 5px;
-  transform: translateX(-50%);
+  flex-direction: column;
+  gap: 6px;
+  transform: translateY(-50%);
 }
 .aircraft-cockpit span {
-  width: 37px;
-  height: 23px;
+  width: 24px;
+  height: 34px;
   background: #324e56;
-  border: 3px solid #b6c8c4;
-  border-radius: 16px 3px 5px 5px;
-  transform: skewY(-13deg);
+  border: 3px solid #cbd5e1;
+  border-radius: 14px 5px 5px 3px;
+  transform: skewX(-12deg);
 }
 .aircraft-cockpit span + span {
-  border-radius: 3px 16px 5px 5px;
-  transform: skewY(13deg);
+  border-radius: 3px 5px 5px 14px;
+  transform: skewX(12deg);
 }
 .aircraft-front,
 .aircraft-rear {
+  position: absolute;
+  top: 40px;
   margin: 0;
   text-align: center;
   font-size: 9px;
   font-weight: 600;
   letter-spacing: 1.7px;
-  color: #84988e;
+  color: #8b9199;
+}
+.aircraft-front {
+  top: 72px;
+  left: 12px;
+  width: 92px;
 }
 .aircraft-front span {
   display: block;
@@ -137,54 +171,67 @@ button:disabled {
   font-size: 17px;
 }
 .aircraft-rear {
-  margin-top: 14px;
+  right: 16px;
+  width: 72px;
 }
 .aircraft-tail {
   position: absolute;
-  bottom: 14px;
-  left: calc(50% - 4px);
-  width: 8px;
-  height: 47px;
-  border-radius: 90% 90% 10% 10%;
-  background: #b8cdc4;
+  top: calc(50% - 4px);
+  right: 22px;
+  width: 48px;
+  height: 8px;
+  border-radius: 10% 90% 90% 10%;
+  background: #cbd5e1;
 }
 .cabin-door-row {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: stretch;
   justify-content: space-between;
-  margin: 15px 8px 18px;
-  font-size: 8px;
+  flex-shrink: 0;
+  width: 34px;
+  margin: 10px 0;
+  font-size: 7px;
   font-weight: 700;
   letter-spacing: 1px;
   color: #548175;
 }
 .cabin-door-row span {
-  padding: 2px 6px;
+  padding: 2px 4px;
   border: 1px solid #b9d6cb;
   border-radius: 3px;
 }
-.cabin-rear-exits {
-  margin-top: 24px;
-  margin-bottom: 12px;
+.cabin-seats {
+  display: flex;
+  flex-shrink: 0;
+  gap: 14px;
 }
 .cabin-row {
   display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  margin: 0 0 17px;
+  gap: 10px;
 }
 .cabin-column-labels {
-  margin-bottom: 15px;
   font-size: 10px;
   font-weight: 600;
   color: #72877e;
 }
 .cabin-column {
+  display: grid;
+  place-items: center;
   width: 44px;
+  height: 44px;
   text-align: center;
 }
 .cabin-aisle {
-  width: 32px;
+  width: 44px;
+  height: 28px;
+  display: grid;
+  place-items: center;
   flex-shrink: 0;
   text-align: center;
   font-size: 10px;
@@ -196,10 +243,10 @@ button:disabled {
 }
 .cabin-window,
 .cabin-window-space {
-  width: 7px;
-  height: 23px;
+  width: 24px;
+  height: 7px;
   flex-shrink: 0;
-  margin: 0 3px;
+  margin: 3px 0;
 }
 .cabin-window {
   border: 1px solid #a8c3d0;
@@ -211,12 +258,12 @@ button:disabled {
 .cabin-seat-space {
   position: relative;
   width: 44px;
-  height: 46px;
+  height: 44px;
   flex-shrink: 0;
 }
 .cabin-seat {
   border: 1.5px solid #a9c3b9;
-  border-radius: 7px 7px 10px 10px;
+  border-radius: 10px 7px 7px 10px;
   background: #fff;
   color: #315e50;
   font-size: 12px;
@@ -229,10 +276,10 @@ button:disabled {
 .cabin-seat::before {
   content: '';
   position: absolute;
-  top: -4px;
-  left: 6px;
-  right: 6px;
-  height: 7px;
+  top: 6px;
+  bottom: 6px;
+  right: -4px;
+  width: 7px;
   border: 1px solid #abc3b9;
   border-radius: 4px;
   background: #edf4f0;
@@ -331,7 +378,7 @@ button:disabled {
 .cabin-mobile-action {
   display: none;
 }
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .cabin-workspace {
     grid-template-columns: minmax(0, 1fr);
     gap: 20px;
@@ -358,31 +405,8 @@ button:disabled {
     font-size: 13px;
   }
 }
-@media (max-width: 420px) {
-  .aircraft-stage {
-    padding-inline: 0;
-  }
-  .aircraft-body {
-    width: calc(100% - 20px);
-  }
-  .cabin-seat,
-  .cabin-seat-space,
-  .cabin-column {
-    width: 36px;
-  }
-  .cabin-seat,
-  .cabin-seat-space {
-    height: 42px;
-  }
-  .cabin-row {
-    gap: 5px;
-  }
-  .cabin-aisle {
-    width: 23px;
-  }
-  .cabin-window,
-  .cabin-window-space {
-    width: 5px;
-    margin-inline: 1px;
+@media (prefers-reduced-motion: reduce) {
+  .aircraft-scroll {
+    scroll-behavior: auto;
   }
 }

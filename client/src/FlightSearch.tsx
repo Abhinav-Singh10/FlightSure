@@ -132,20 +132,7 @@ export function FlightSearch({ onOpen }: { onOpen: (id: string) => void }) {
       </Card>
 
       <div aria-live="polite" aria-busy={busy}>
-        {!results ? (
-          <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center">
-            <span
-              aria-hidden="true"
-              className="mb-3 inline-block text-3xl text-primary"
-            >
-              ↗
-            </span>
-            <h2 className="font-semibold">Where will you go next?</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Choose a route and date to explore available flights.
-            </p>
-          </div>
-        ) : (
+        {results && (
           <>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-semibold">

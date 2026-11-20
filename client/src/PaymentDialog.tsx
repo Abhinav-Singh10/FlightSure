@@ -21,7 +21,7 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
   function pay() {
     const digits = cardNumber.replace(/\s/g, '');
     if (!/^\d{16}$/.test(digits)) {
-      setError('Enter a 16-digit demo card number.'); return;
+      setError('Enter a 16-digit card number.'); return;
     }
     const month = Number(expiry.slice(0, 2));
     const year = Number(expiry.slice(3));
@@ -55,7 +55,7 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
       <form className="space-y-4 p-6" autoComplete="off" onSubmit={(event) => { event.preventDefault(); pay(); }}>
         <div className="flex items-center gap-3 border-b border-border pb-4">
           <span className="rounded-lg bg-blue-50 px-3 py-2 text-lg text-blue-700" aria-hidden="true">▤</span>
-          <div><h2 className="font-semibold">Pay with card</h2><p className="mt-0.5 text-xs text-muted-foreground">Use fake details only. No money is charged.</p></div>
+          <h2 className="font-semibold">Pay with card</h2>
         </div>
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         <label className="block text-sm font-medium">Card number
@@ -75,20 +75,26 @@ export function PaymentDialog({ amount, passengerName, onClose, onPay }: {
         <label className="block text-sm font-medium">Name on card
           <Input className="mt-2" maxLength={100} required value={cardName} onChange={(event) => setCardName(event.target.value)} />
         </label>
-        <label className="block text-sm font-medium">Demo payment result
-          <select className="mt-2 h-10 w-full rounded-lg border border-input bg-white px-3 text-sm" value={outcome}
-            onChange={(event) => {
-              const value = event.target.value;
-              if (value === 'SUCCESS' || value === 'FAILURE' || value === 'DELAYED_SUCCESS') setOutcome(value);
-            }}>
-            <option value="SUCCESS">Success</option>
-            <option value="FAILURE">Failure</option>
-            <option value="DELAYED_SUCCESS">Success after 30 seconds</option>
-          </select>
-        </label>
-        <p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-muted-foreground">Use any 16-digit fake card number, a current or future expiry and any three-digit CVV. The demo payment result controls the simulation.</p>
+        <p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-muted-foreground">Enter a 16-digit card number, a current or future expiry and a three-digit CVV.</p>
         <Button type="submit" className="w-full bg-blue-600 text-white hover:bg-blue-700">Pay {money(amount)}</Button>
         <p className="text-center text-[11px] text-muted-foreground">FlightSure demo checkout · Card details are not saved</p>
+        <details className="border-t border-border pt-3 text-xs text-muted-foreground">
+          <summary className="w-fit cursor-pointer text-[11px] hover:text-foreground">Developer settings</summary>
+          <div className="mt-3 rounded-lg bg-slate-50 p-3">
+            <label className="block font-medium">Payment outcome
+              <select className="mt-2 h-10 w-full rounded-lg border border-input bg-white px-3 text-sm" value={outcome}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === 'SUCCESS' || value === 'FAILURE' || value === 'DELAYED_SUCCESS') setOutcome(value);
+                }}>
+                <option value="SUCCESS">Success</option>
+                <option value="FAILURE">Failure</option>
+                <option value="DELAYED_SUCCESS">Success after 30 seconds</option>
+              </select>
+            </label>
+            <p className="mt-2 leading-5">Controls the simulated payment result. No money is charged.</p>
+          </div>
+        </details>
       </form>
     </section>
   </AuthDialog>;

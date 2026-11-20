@@ -12,7 +12,6 @@ import { MyBookings } from './MyBookings.tsx';
 import { WaitlistDetails } from './WaitlistDetails.tsx';
 import { AdminPanel } from './AdminPanel.tsx';
 import { Button } from './components/ui/button.tsx';
-import { Card } from './components/ui/card.tsx';
 
 function readView() {
   const query = new URLSearchParams(window.location.search);
@@ -143,7 +142,9 @@ export function App() {
               aria-hidden="true"
               className="flex size-9 items-center justify-center rounded-xl bg-primary text-white"
             >
-              ↗
+              <svg className="size-5" viewBox="0 0 24 24" fill="currentColor" focusable="false">
+                <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16Z" />
+              </svg>
             </span>
             FlightSure
           </a>
@@ -201,21 +202,22 @@ export function App() {
             : 'mx-auto max-w-6xl px-5 pb-14 pt-10 sm:px-8 sm:pt-14'
         }
       >
-        {!focusedView && (
-          <div className="mb-9 max-w-2xl">
-            <p className="mb-3 text-xs font-semibold tracking-[0.18em] text-primary">
-              DELHI · BHOPAL · BANGALORE
-            </p>
-            <h1 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-              Your next journey,
-              <br />
-              <span className="text-primary">a little simpler.</span>
-            </h1>
-            <p className="mt-4 text-base leading-relaxed text-muted-foreground">
-              Explore direct flights, compare schedules, and find the journey
-              that fits your day.
-            </p>
-          </div>
+        {!focusedView && !flightId && (
+          <>
+            <div className="mb-7 max-w-3xl">
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+                Find your next flight.
+              </h1>
+            </div>
+            <img
+              src="/images/flightsure-sky.jpg"
+              alt="A white passenger airplane flying above sunlit clouds at dawn."
+              width={2172}
+              height={724}
+              fetchPriority="high"
+              className="mb-7 aspect-video w-full rounded-2xl object-cover sm:aspect-[3/1]"
+            />
+          </>
         )}
         {error && (
           <div
@@ -258,7 +260,9 @@ export function App() {
           className={
             focusedView
               ? 'hidden'
-              : 'grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]'
+              : accountForm
+                ? 'grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_320px]'
+                : ''
           }
         >
           <div>
@@ -275,45 +279,15 @@ export function App() {
               />
             )}
           </div>
-          <aside className={authMode ? 'order-first lg:order-last' : ''}>
-            {!focusedView &&
-              (accountForm || (
-                <Card className="bg-[#edf4f0] shadow-none">
-                  <div
-                    aria-hidden="true"
-                    className="mb-5 flex size-11 items-center justify-center rounded-full bg-white text-xl text-primary"
-                  >
-                    ↗
-                  </div>
-                  <h2 className="text-lg font-semibold">
-                    Three cities. More possibilities.
-                  </h2>
-                  <p className="mt-3 text-sm leading-6 text-muted-foreground">
-                    From a new beginning in Bangalore to a familiar welcome in
-                    Delhi. Find a direct connection to what matters.
-                  </p>
-                  <div className="mt-6 space-y-4 border-t border-primary/15 pt-5 text-sm">
-                    {['Delhi', 'Bhopal', 'Bangalore'].map((city) => (
-                      <div key={city} className="flex justify-between">
-                        <span>{city}</span>
-                        <span aria-hidden="true" className="text-primary">
-                          ↗
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </Card>
-              ))}
-          </aside>
+          {!focusedView && accountForm && (
+            <aside className="order-first lg:order-last">{accountForm}</aside>
+          )}
         </div>
         {focusedView && accountForm && (
           <AuthDialog onClose={() => setAuthMode(null)}>
             {accountForm}
           </AuthDialog>
         )}
-        <footer className="mt-10 border-t border-border pt-5 text-xs text-muted-foreground">
-          All flight times are in Indian Standard Time (IST). Fares are in INR.
-        </footer>
       </main>
     </>
   );

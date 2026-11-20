@@ -40,9 +40,7 @@ export function CabinView({ id, user, onBack, onLogin, onSessionExpired, onCheck
     </div>
     <div className="flex flex-wrap items-end justify-between gap-5">
       <div>
-        <p className="mb-2 text-xs font-semibold tracking-[0.18em] text-primary">MAKE YOURSELF COMFORTABLE</p>
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">A seat for your journey.</h1>
-        <p className="mt-3 text-sm text-muted-foreground">Choose a window view or easy aisle access. Your journey starts here.</p>
+        <p className="text-sm text-muted-foreground">Choose a window view or easy aisle access.</p>
       </div>
       {flight && <div className="rounded-xl border border-border bg-white px-5 py-3 text-sm">
         <p className="font-semibold">{flight.origin.code} <span className="px-2 text-primary" aria-hidden="true">→</span> {flight.destination.code} <span className="ml-3 text-xs font-normal text-muted-foreground">{flight.flightNumber}</span></p>

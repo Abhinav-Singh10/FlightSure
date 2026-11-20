@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { Flight, Hold, SeatMap, User } from '../../shared/types.ts';
 import { createHold, loadFlight, loadHold, loadSeats, releaseHold } from './api.ts';
 import { HoldSummary } from './HoldSummary.tsx';
@@ -36,6 +36,12 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [existingBookingId, setExistingBookingId] = useState<string | null>(null);
+  const cabinScroll = useRef<HTMLDivElement>(null);
+
+  function scrollCabin(direction: number) {
+    const cabin = cabinScroll.current;
+    if (cabin) cabin.scrollBy({ left: direction * cabin.clientWidth * 0.75 });
+  }
 
   function save(value: SavedHold) {
     sessionStorage.setItem(storageKey, JSON.stringify(value));
@@ -138,50 +144,61 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
         <div><h2 className="font-semibold">{seats.layout.aircraftName}</h2><p className="mt-1 text-xs text-muted-foreground">{seats.seats.length} seats · {rows.length} rows · {flight.availableSeats} available</p></div>
         <Button variant="ghost" disabled={busy} onClick={() => void refresh().catch(showError)}>↻ Refresh seats</Button>
       </div>
-      <div className="aircraft-stage">
-        <svg className="aircraft-wings" viewBox="0 0 760 600" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M310 200 L205 245 L42 365 Q30 378 52 380 L264 328 L310 350 Z" />
-          <path d="M450 200 L555 245 L718 365 Q730 378 708 380 L496 328 L450 350 Z" />
-        </svg>
-        <svg className="aircraft-tail-wings" viewBox="0 0 760 200" preserveAspectRatio="none" aria-hidden="true">
-          <path d="M330 20 L220 120 L220 142 L350 110 Z" />
-          <path d="M430 20 L540 120 L540 142 L410 110 Z" />
-        </svg>
-        <div className="aircraft-body">
-          <div className="aircraft-cockpit" aria-hidden="true"><span /><span /></div>
-          <p className="aircraft-front">FRONT OF AIRCRAFT <span aria-hidden="true">↑</span></p>
-          <div className="cabin-door-row" aria-hidden="true"><span>EXIT</span><span>EXIT</span></div>
-          <div className="cabin-row cabin-column-labels" aria-hidden="true">
-            <span className="cabin-window-space" />
-            {seats.layout.columns.map((column) => <Fragment key={column}>
-              <span className="cabin-column">{column}</span>
-              {seats.layout.aisleAfter.includes(column) && <span className="cabin-aisle">AISLE</span>}
-            </Fragment>)}
-            <span className="cabin-window-space" />
+      <div className="cabin-scroll-controls">
+        <p>Scroll sideways to see all rows</p>
+        <div className="flex gap-2">
+          <Button variant="outline" className="h-10 w-10 px-0" aria-label="Scroll toward the front of the aircraft" aria-controls="aircraft-seat-scroll" onClick={() => scrollCabin(-1)}>←</Button>
+          <Button variant="outline" className="h-10 w-10 px-0" aria-label="Scroll toward the rear of the aircraft" aria-controls="aircraft-seat-scroll" onClick={() => scrollCabin(1)}>→</Button>
+        </div>
+      </div>
+      <div id="aircraft-seat-scroll" className="aircraft-scroll" ref={cabinScroll} role="region" aria-label="Scrollable aircraft cabin" tabIndex={0}>
+        <div className="aircraft-stage">
+          <svg className="aircraft-wings" viewBox="0 0 600 500" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M120 195 L340 20 Q355 12 356 28 L280 210 Z" />
+            <path d="M120 305 L340 480 Q355 488 356 472 L280 290 Z" />
+          </svg>
+          <svg className="aircraft-tail-wings" viewBox="0 0 220 400" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M80 175 L150 30 L180 30 L150 180 Z" />
+            <path d="M80 225 L150 370 L180 370 L150 220 Z" />
+          </svg>
+          <div className="aircraft-body">
+            <div className="aircraft-cockpit" aria-hidden="true"><span /><span /></div>
+            <p className="aircraft-front">FRONT OF AIRCRAFT <span aria-hidden="true">←</span></p>
+            <div className="cabin-door-row" aria-hidden="true"><span>EXIT</span><span>EXIT</span></div>
+            <div className="cabin-seats">
+              <div className="cabin-row cabin-column-labels" aria-hidden="true">
+                <span className="cabin-window-space" />
+                {seats.layout.columns.map((column) => <Fragment key={column}>
+                  <span className="cabin-column">{column}</span>
+                  {seats.layout.aisleAfter.includes(column) && <span className="cabin-aisle">AISLE</span>}
+                </Fragment>)}
+                <span className="cabin-window-space" />
+              </div>
+              {rows.map((row) => <div key={row} className="cabin-row">
+                <span className="cabin-window" aria-hidden="true" />
+                {seats.layout.columns.map((column) => {
+                  const seat = seats.seats.find((seat) => seat.row === row && seat.column === column);
+                  const chosen = selected === seat?.id;
+                  const besideWindow = column === seats.layout.columns[0] || column === seats.layout.columns.at(-1);
+                  return <Fragment key={column}>
+                    {seat ? <button type="button"
+                      aria-label={`Seat ${seat.label}, ${besideWindow ? 'window' : 'aisle'}, ${seat.status.toLowerCase()}${seat.isMine ? ' by you' : ''}`}
+                      aria-pressed={chosen}
+                      disabled={busy || hasHold || Boolean(bookedSeat) || !flight.bookable || seat.status !== 'AVAILABLE' || Boolean(saved.createKey) || user?.role === 'ADMIN'}
+                      onClick={() => { setSelected(seat.id); setError(''); if (!hasHold) setCurrent(null); }}
+                      className={`cabin-seat ${chosen || seat.isMine ? 'cabin-seat-selected' : seat.status !== 'AVAILABLE' ? 'cabin-seat-unavailable' : ''}`}>
+                      {seat.label}
+                    </button> : <span className="cabin-seat-space" />}
+                    {seats.layout.aisleAfter.includes(column) && <span className="cabin-aisle" aria-label={`Row ${row}`}>{row}</span>}
+                  </Fragment>;
+                })}
+                <span className="cabin-window" aria-hidden="true" />
+              </div>)}
+            </div>
+            <div className="cabin-door-row" aria-hidden="true"><span>EXIT</span><span>EXIT</span></div>
+            <p className="aircraft-rear">REAR OF AIRCRAFT</p>
+            <div className="aircraft-tail" aria-hidden="true" />
           </div>
-          {rows.map((row) => <div key={row} className="cabin-row">
-            <span className="cabin-window" aria-hidden="true" />
-            {seats.layout.columns.map((column) => {
-              const seat = seats.seats.find((seat) => seat.row === row && seat.column === column);
-              const chosen = selected === seat?.id;
-              const besideWindow = column === seats.layout.columns[0] || column === seats.layout.columns.at(-1);
-              return <Fragment key={column}>
-                {seat ? <button type="button"
-                  aria-label={`Seat ${seat.label}, ${besideWindow ? 'window' : 'aisle'}, ${seat.status.toLowerCase()}${seat.isMine ? ' by you' : ''}`}
-                  aria-pressed={chosen}
-                  disabled={busy || hasHold || Boolean(bookedSeat) || !flight.bookable || seat.status !== 'AVAILABLE' || Boolean(saved.createKey) || user?.role === 'ADMIN'}
-                  onClick={() => { setSelected(seat.id); setError(''); if (!hasHold) setCurrent(null); }}
-                  className={`cabin-seat ${chosen || seat.isMine ? 'cabin-seat-selected' : seat.status !== 'AVAILABLE' ? 'cabin-seat-unavailable' : ''}`}>
-                  {seat.label}
-                </button> : <span className="cabin-seat-space" />}
-                {seats.layout.aisleAfter.includes(column) && <span className="cabin-aisle" aria-label={`Row ${row}`}>{row}</span>}
-              </Fragment>;
-            })}
-            <span className="cabin-window" aria-hidden="true" />
-          </div>)}
-          <div className="cabin-door-row cabin-rear-exits" aria-hidden="true"><span>EXIT</span><span>EXIT</span></div>
-          <p className="aircraft-rear">REAR OF AIRCRAFT</p>
-          <div className="aircraft-tail" aria-hidden="true" />
         </div>
       </div>
       <div className="cabin-legend" aria-label="Seat status legend">
@@ -218,10 +235,6 @@ export function SeatPicker({ flight, initialSeats, user, onFlightChange, onLogin
           onCheckout={() => current.hold.waitlistEntryId ? onEntry(current.hold.waitlistEntryId) : onCheckout(current.hold.id)} onBooking={onBooking} />}
         {!hasHold && !bookedSeat && <p className="mt-4 text-xs leading-5 text-muted-foreground">Selecting a seat does not reserve it. Your seat is reserved temporarily only after the hold succeeds.</p>}
       </Card>
-      <div className="mt-4 rounded-xl border border-border px-5 py-4 text-xs leading-6 text-muted-foreground">
-        <p className="font-semibold text-foreground">A little help choosing</p>
-        <p>Columns {seats.layout.columns[0]} and {seats.layout.columns.at(-1)} are beside the windows. The space down the middle is the aisle.</p>
-      </div>
     </aside>
     {selectedSeat && !hasHold && !bookedSeat && <div className="cabin-mobile-action">
       <div><p className="text-xs text-muted-foreground">Your selection</p><p className="font-semibold">Seat {selectedSeat.label} · {money(flight.fare.amountMinor)}</p></div>
