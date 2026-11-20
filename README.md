@@ -12,7 +12,9 @@ For a new setup:
 cp .env.example .env
 ```
 
-If `.env` already exists, keep it and add any missing keys from `.env.example`. Set `APP_ORIGIN=http://localhost:5173`, your `JWT_SECRET`, and `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`. Optional: set `SEED_START_DATE=YYYY-MM-DD`; otherwise flights start tomorrow in IST.
+If `.env` already exists, keep it and add any missing keys from `.env.example`. Set `APP_ORIGIN=http://localhost:5173`, your `JWT_SECRET`, and `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`. 
+
+Optional: set `SEED_START_DATE=YYYY-MM-DD`; otherwise flights start tomorrow in IST.
 
 ```sh
 npm install
@@ -20,6 +22,13 @@ npm run db:start
 npm run db:migrate
 npm run db:seed
 ```
+
+After seeding, run `npm run demo:prepare` to recreate the scenario shown in the demo video. It prepares these two demo passenger accounts:
+
+| Passenger | Email | Password |
+|---|---|---|
+| passengerA | pass1@gmail.com | passenger1 |
+| passengerB | pass2@gmail.com | passenger2 |
 
 Backend terminal:
 
@@ -33,7 +42,9 @@ Frontend terminal:
 npm run web
 ```
 
-App: [localhost:5173](http://localhost:5173). Health: [localhost:3000/health](http://localhost:3000/health). Admin login uses the seeded credentials from `.env`.
+App: [localhost:5173](http://localhost:5173). Health: [localhost:3000/health](http://localhost:3000/health). 
+
+Admin login uses the seeded credentials from `.env`.
 
 Test database setup (once):
 
