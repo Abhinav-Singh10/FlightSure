@@ -43,19 +43,12 @@ docker compose exec postgres createdb -U flightsure flightsure_test
 
 Set `TEST_DATABASE_URL` in `.env` using `.env.example`.
 
-For an older database containing `aircraft_seats`, run this before migrations:
-
-```sh
-npx tsx --env-file=.env database/convert-legacy.ts
-```
-
 ## Scripts
 
 | Command | Task |
 |---|---|
 | `npm run dev` | Start backend on port 3000 |
 | `npm run web` | Start frontend on port 5173 |
-| `npm run typecheck` | Check TypeScript |
 | `npm run build` | Build frontend into `dist` |
 | `npm test` | Run Jest tests |
 | `npm run db:start` | Start PostgreSQL |

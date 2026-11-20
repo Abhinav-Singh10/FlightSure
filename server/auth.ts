@@ -54,17 +54,6 @@ auth.post('/register', async (request, response) => {
     return;
   }
   const input = registerBody.parse(request.body);
-  // bcrypt limits bytes, so non-ASCII passwords also need this check.
-  if (Buffer.byteLength(input.password, 'utf8') > 72) {
-    fail(
-      response,
-      400,
-      'VALIDATION_ERROR',
-      'Password must be at most 72 UTF-8 bytes.',
-      [{ field: 'password', message: 'Use a shorter password.' }],
-    );
-    return;
-  }
   const passwordHash = await bcrypt.hash(input.password, 12);
   const client = await pool.connect();
   let context: SessionContext;
@@ -99,15 +88,6 @@ auth.post('/register', async (request, response) => {
 auth.post('/login', async (request, response) => {
   const current = await readSession(request);
   const input = loginBody.parse(request.body);
-  if (Buffer.byteLength(input.password, 'utf8') > 72) {
-    fail(
-      response,
-      400,
-      'VALIDATION_ERROR',
-      'Password must be at most 72 UTF-8 bytes.',
-    );
-    return;
-  }
   const result = await pool.query<User & { password_hash: string }>(
     'SELECT id, email, role, password_hash FROM accounts WHERE email = $1',
     [input.email],

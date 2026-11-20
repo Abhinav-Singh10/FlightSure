@@ -28,10 +28,10 @@ async function seed() {
   if (
     !adminPassword ||
     adminPassword.length < 8 ||
-    Buffer.byteLength(adminPassword, 'utf8') > 72
+    adminPassword.length > 72
   ) {
     throw new Error(
-      'SEED_ADMIN_PASSWORD needs at least 8 characters and at most 72 UTF-8 bytes.',
+      'SEED_ADMIN_PASSWORD needs between 8 and 72 characters.',
     );
   }
 

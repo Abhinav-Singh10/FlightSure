@@ -7,7 +7,12 @@ import type { Hold, Payment, Session } from '../shared/types.ts';
 
 type Passenger = { id: string; email: string; cookie: string; name: string };
 type Seat = { id: string; label: string };
-const password = 'FlightSureDemo123!'; // Public, disposable demonstration accounts only.
+type DemoAccount = { name: string; email: string; password: string };
+
+// Public demonstration credentials only. Reruns log in without resetting passwords.
+const passengerA: DemoAccount = { name: 'passengerA', email: 'pass1@gmail.com', password: 'passenger1' };
+const passengerB: DemoAccount = { name: 'passengerB', email: 'pass2@gmail.com', password: 'passenger2' };
+const backgroundPassword = 'FlightSureDemo123!';
 const run = randomUUID().slice(0, 8);
 const day = 24 * 60 * 60 * 1000;
 const paymentIds: string[] = [];
@@ -36,13 +41,17 @@ async function request(path: string, cookie: string, body: object) {
   return response;
 }
 
-async function register(label: string, name: string): Promise<Passenger> {
-  const email = `demo-${run}-${label}@example.com`;
-  const response = await request('/auth/register', '', { email, password });
+async function preparePassenger(account: DemoAccount): Promise<Passenger> {
+  const existing = await pool.query<{ role: string }>('SELECT role FROM accounts WHERE email = $1', [account.email]);
+  if (existing.rows[0] && existing.rows[0].role !== 'PASSENGER') {
+    throw new Error(`${account.email} must belong to a passenger account.`);
+  }
+  const path = existing.rowCount ? '/auth/login' : '/auth/register';
+  const response = await request(path, '', { email: account.email, password: account.password });
   const result: { data: Session } = await response.json();
-  if (!result.data.user) throw new Error('Registration did not return a passenger.');
+  if (!result.data.user) throw new Error('Demo account setup did not return a passenger.');
   const cookie = response.headers.getSetCookie().map((value) => value.split(';')[0]).join('; ');
-  return { id: result.data.user.id, email, cookie, name };
+  return { id: result.data.user.id, email: account.email, cookie, name: account.name };
 }
 
 async function createFlight(number: string, origin: string, destination: string, date: string, hour: number, fare: number, layoutId: string) {
@@ -113,6 +122,8 @@ async function prepare() {
     throw new Error(`DEMO_DATE must be a valid YYYY-MM-DD on or after ${earliest}. Later dates keep recovery isolated from existing flights.`);
   }
   console.log(`Preparing demo ${run}, starting ${date} IST. Existing records will remain unchanged.`);
+  const a = await preparePassenger(passengerA);
+  const b = await preparePassenger(passengerB);
   const prefix = `D${run.slice(0, 4).toUpperCase()}`;
   const normal = await createFlight(`${prefix}N`, 'DEL', 'BLR', date, 9, 450000, layout.rows[0].id);
   const full = await createFlight(`${prefix}W`, 'DEL', 'BHO', date, 13, 450000, layout.rows[0].id);
@@ -120,14 +131,16 @@ async function prepare() {
   const source = await createFlight(`${prefix}C`, 'BHO', 'DEL', recoveryDate, 9, 450023, layout.rows[0].id);
   const replacement = await createFlight(`${prefix}R`, 'BHO', 'DEL', recoveryDate, 13, 600001, layout.rows[0].id);
 
-  const a = await register('a', 'Presenter A');
-  const b = await register('b', 'Presenter B');
   const waitlistPayment = await book(a, full.id, full.seats[0]);
   const firstPayment = await book(a, source.id, source.seats[0]);
   await finishPayments(); // A is confirmed first, so A gets the single replacement.
   const secondPayment = await book(b, source.id, source.seats[1]);
   for (let index = 1; index <= 79; index += 1) {
-    const filler = await register(`filler-${index}`, `Demo Passenger ${index}`);
+    const filler = await preparePassenger({
+      name: `Demo Passenger ${index}`,
+      email: `demo-${run}-filler-${index}@example.com`,
+      password: backgroundPassword,
+    });
     await book(filler, full.id, full.seats[index]);
     await book(filler, replacement.id, replacement.seats[index]);
     await request('/auth/logout', filler.cookie, {});
@@ -153,7 +166,7 @@ async function prepare() {
   );
   function bookingLink(paymentId: string) {
     const booking = bookings.rows.find((row) => row.payment_id === paymentId);
-    if (!booking) throw new Error('A presenter booking was not confirmed.');
+    if (!booking) throw new Error('A demo passenger booking was not confirmed.');
     return `[${booking.reference}](${origin}/?view=booking&booking=${booking.id})`;
   }
   const origin = process.env.APP_ORIGIN ?? 'http://localhost:5173';
@@ -161,9 +174,9 @@ async function prepare() {
 ## Accounts\n
 | Account | Email | Password |
 |---|---|---|
-| Presenter A | ${a.email} | ${password} |
-| Presenter B | ${b.email} | ${password} |
-| New registration (not created yet) | demo-${run}-new@example.com | ${password} |
+| ${passengerA.name} | ${a.email} | ${passengerA.password} |
+| ${passengerB.name} | ${b.email} | ${passengerB.password} |
+| New registration (not created yet) | demo-${run}-new@example.com | ${backgroundPassword} |
 
 Administrator: use SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD from your private .env.\n
 ## Prepared flights\n
@@ -176,24 +189,24 @@ Administrator: use SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD from your private .env
 
 - [Normal flight](${origin}/?flight=${normal.id}) · [Cabin](${origin}/?view=seats&flight=${normal.id})
 - [Full flight](${origin}/?flight=${full.id})
-- A's booking to cancel for the waitlist: ${bookingLink(waitlistPayment)}
+- ${passengerA.name}'s booking to cancel for the waitlist: ${bookingLink(waitlistPayment)}
 - [Admin cancellation](${origin}/?view=admin&flight=${source.id})
-- Recovery booking A: ${bookingLink(firstPayment)}
-- Recovery booking B: ${bookingLink(secondPayment)}
+- ${passengerA.name}'s recovery booking: ${bookingLink(firstPayment)}
+- ${passengerB.name}'s recovery booking: ${bookingLink(secondPayment)}
 - [My bookings](${origin}/?view=bookings) · [Messages](${origin}/?view=bookings&tab=messages)\n
-Expected recovery: A moves to ${replacement.number}, seat 1A, retaining ₹4,500.23 paid fare; B becomes UNASSIGNED. The replacement's advertised fare is ₹6,000.01.\n
-No waitlist entry or cancellation has been started. Register the new passenger live. Rehearsing changes these records: run demo:prepare again for a fresh set; earlier records are retained.\n`;
+Expected recovery: ${passengerA.name} moves to ${replacement.number}, seat 1A, retaining ₹4,500.23 paid fare; ${passengerB.name} becomes UNASSIGNED. The replacement's advertised fare is ₹6,000.01.\n
+No waitlist entry or cancellation has been started. Register the suggested new passenger live; that account has not been created. Rehearsing changes these records: run demo:prepare again for fresh flights and bookings. The two named passenger accounts are reused; earlier records are retained.\n`;
   await mkdir('demo', { recursive: true });
   await writeFile('demo/current.md', markdown);
-  console.log(`Demo ready: 4 flights, 81 registered passengers, ${paymentIds.length} confirmed bookings.`);
-  console.log('Open demo/current.md for the dates, presenter logins and direct links.');
+  console.log(`Demo ready: 4 flights, 2 named passengers, 79 new background passengers, ${paymentIds.length} confirmed bookings.`);
+  console.log('Open demo/current.md for the dates, passenger logins and direct links.');
 }
 
 try {
   await prepare();
 } catch (error) {
   console.error('Demo preparation failed:', error instanceof Error ? error.message : 'Unknown error');
-  console.error(`Existing data was not deleted. Any partial demo records have the demo-${run} account prefix. Rerun for a fresh set.`);
+  console.error(`Existing data was not deleted. The named passenger accounts may have been created; partial background accounts have the demo-${run} prefix. Reruns reuse the named accounts with their configured passwords.`);
   process.exitCode = 1;
 } finally {
   await new Promise<void>((resolve) => server.close(() => resolve()));

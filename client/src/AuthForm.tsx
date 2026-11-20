@@ -28,10 +28,6 @@ export function AuthForm({
   async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
-    if (new TextEncoder().encode(password).length > 72) {
-      setError('Your password is too long. Use at most 72 UTF-8 bytes.');
-      return;
-    }
     setBusy(true);
     try {
       onSuccess(await submitAuth(mode, email, password));
