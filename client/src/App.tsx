@@ -4,7 +4,7 @@ import { loadSession, logout } from './api.ts';
 import { AuthForm } from './AuthForm.tsx';
 import { FlightSearch } from './FlightSearch.tsx';
 import { FlightDetails } from './FlightDetails.tsx';
-import { CabinView } from './CabinView.tsx';
+import { CabinView } from './cabin/CabinView.tsx';
 import { AuthDialog } from './AuthDialog.tsx';
 import { Checkout } from './Checkout.tsx';
 import { BookingDetails } from './BookingDetails.tsx';
@@ -12,6 +12,7 @@ import { MyBookings } from './MyBookings.tsx';
 import { WaitlistDetails } from './WaitlistDetails.tsx';
 import { AdminPanel } from './AdminPanel.tsx';
 import { Button } from './components/ui/button.tsx';
+import { PlaneIcon } from './components/PlaneIcon.tsx';
 
 function readView() {
   const query = new URLSearchParams(window.location.search);
@@ -132,20 +133,13 @@ export function App() {
   return (
     <>
       <header className="border-b border-border bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8">
+        <div className={`mx-auto flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-8 ${cabinOpen ? 'max-w-[1760px]' : 'max-w-6xl'}`}>
           <a
             href="/"
             aria-label="FlightSure home"
-            className="flex items-center gap-3 text-xl font-bold tracking-tight"
+            className="flex items-center gap-3 text-2xl font-extrabold tracking-tight"
           >
-            <span
-              aria-hidden="true"
-              className="flex size-9 items-center justify-center rounded-xl bg-primary text-white"
-            >
-              <svg className="size-5" viewBox="0 0 24 24" fill="currentColor" focusable="false">
-                <path d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5L21 16Z" />
-              </svg>
-            </span>
+            <PlaneIcon className="size-9 text-primary" />
             FlightSure
           </a>
           <nav
@@ -198,7 +192,7 @@ export function App() {
       <main
         className={
           cabinOpen
-            ? 'mx-auto min-h-[calc(100vh-80px)] max-w-[1440px] px-4 pb-10 pt-5 sm:px-8'
+            ? 'mx-auto min-h-[calc(100vh-80px)] max-w-[1760px] px-4 pb-10 pt-5 sm:px-8'
             : 'mx-auto max-w-6xl px-5 pb-14 pt-10 sm:px-8 sm:pt-14'
         }
       >

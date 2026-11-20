@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { Flight, SeatMap, User } from '../../shared/types.ts';
-import { loadFlight, loadSeats } from './api.ts';
-import { flightDate, flightTime } from './display.ts';
+import './cabin.css';
+import type { Flight, SeatMap, User } from '../../../shared/types.ts';
+import { loadFlight, loadSeats } from '../api.ts';
+import { flightDate, flightTime } from '../display.ts';
 import { SeatPicker } from './SeatPicker.tsx';
-import { Button } from './components/ui/button.tsx';
-import { Card } from './components/ui/card.tsx';
+import { Button } from '../components/ui/button.tsx';
+import { Card } from '../components/ui/card.tsx';
+import { ArrowLeftIcon, ArrowRightIcon } from './CabinIcons.tsx';
 
 export function CabinView({ id, user, onBack, onLogin, onSessionExpired, onCheckout, onBooking, onBookings, onEntry }: {
   id: string;
@@ -34,17 +36,18 @@ export function CabinView({ id, user, onBack, onLogin, onSessionExpired, onCheck
   }, [id]);
 
   return <section aria-label="Seat selection" className="space-y-6">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <Button variant="ghost" className="px-0" onClick={onBack}>← Back to flight details</Button>
-      <p className="text-xs font-medium tracking-widest text-muted-foreground">01 FLIGHT <span className="mx-3" aria-hidden="true">/</span><span className="text-primary">02 YOUR SEAT</span></p>
-    </div>
-    <div className="flex flex-wrap items-end justify-between gap-5">
-      <div>
-        <p className="text-sm text-muted-foreground">Choose a window view or easy aisle access.</p>
-      </div>
-      {flight && <div className="rounded-xl border border-border bg-white px-5 py-3 text-sm">
-        <p className="font-semibold">{flight.origin.code} <span className="px-2 text-primary" aria-hidden="true">→</span> {flight.destination.code} <span className="ml-3 text-xs font-normal text-muted-foreground">{flight.flightNumber}</span></p>
-        <p className="mt-1 text-xs text-muted-foreground">{flightDate(flight.departureAt)} · {flightTime(flight.departureAt)} IST</p>
+    <Button variant="ghost" className="px-0 text-primary" onClick={onBack}>
+      <ArrowLeftIcon className="size-4" /> Back to flight details
+    </Button>
+    <div className="cabin-heading">
+      <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">Choose your seat</h1>
+      {flight && <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <p className="flex items-center gap-3 text-lg font-bold sm:text-xl">
+          {flight.origin.name}<ArrowRightIcon className="size-5 text-primary" />{flight.destination.name}
+        </p>
+        <p className="text-sm text-muted-foreground sm:border-l sm:border-border sm:pl-6">
+          {flightDate(flight.departureAt)} · {flightTime(flight.departureAt)} IST · {flight.flightNumber}
+        </p>
       </div>}
     </div>
     {error ? <Card role="alert" className="text-red-800">{error}</Card> : !flight || !seats ? <Card role="status">Loading cabin…</Card> :
